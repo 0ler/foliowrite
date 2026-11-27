@@ -18,6 +18,7 @@ import {
 } from 'docx';
 import type { DocumentRecord } from '../types';
 import { htmlToPlainText } from './metrics';
+import { extractPdfToEditableDocument } from './pdfImport';
 import { buildWorkspaceBackup, createDocument, restoreWorkspaceBackup, type WorkspaceBackupPayload } from './storage';
 
 function sanitizeFileName(name: string): string {
@@ -86,6 +87,17 @@ export async function importDocumentFile(
   const ext = file.name.split('.').pop()?.toLowerCase() || '';
   const baseTitle = file.name.replace(/\.[^/.]+$/, '') || 'เอกสารนำเข้า';
 
+  if (ext === 'pdf') {
+    const pdfExtracted = await extractPdfToEditableDocument(file);
+    return createDocument({
+      title: baseTitle,
+      contentHtml: pdfExtracted.html,
+      pageSize: pdfExtracted.pageSize,
+      orientation: pdfExtracted.orientation,
+      folderId,
+    });
+  }
+
   if (ext === 'docx') {
     const arrayBuffer = await file.arrayBuffer();
     const result = await mammoth.convertToHtml({ arrayBuffer });
@@ -120,7 +132,19 @@ export async function importDocumentFile(
     });
   }
 
-  throw new Error('รองรับเฉพาะไฟล์ .docx, .html, .txt และ .md เท่านั้น');
+  throw new Error('รองรับเฉพาะไฟล์ .pdf, .docx, .html, .txt และ .md เท่านั้น');
+}
+
+export async function convertPdfFileToDocxAndOpen(
+  file: File,
+  folderId: string | null = null,
+  autoDownloadDocx = true,
+): Promise<DocumentRecord> {
+  const docRecord = await importDocumentFile(file, folderId);
+  if (autoDownloadDocx) {
+    await exportDocumentAsDocx(docRecord);
+  }
+  return docRecord;
 }
 
 interface InlineRunStyle {

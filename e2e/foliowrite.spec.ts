@@ -127,4 +127,71 @@ test.describe('FolioWrite Cross-Device E2E Flows (replica-test)', () => {
     await page.screenshot({ path: path.join(screenshotDir, 'S02-mobile.png') });
     await context.close();
   });
+
+  test('PDF Import & PDF-to-DOCX Conversion: Thai glyphs, Headings, Alignment & Tables stay intact and editable', async ({
+    page,
+  }) => {
+    const errors: string[] = [];
+    page.on('console', (msg) => {
+      if (msg.type() === 'error') errors.push(msg.text());
+    });
+    page.on('pageerror', (err) => errors.push(err.message));
+
+    await page.goto('/');
+    await page.locator('#tpl-thai-memo').click();
+    await expect(page.locator('.tiptap')).toContainText('บันทึกข้อความ');
+
+    // Generate a real vector PDF with Thai floating vowels, centered heading, and multi-column table
+    const samplePdfPath = path.join('/tmp', `sample-thai-${Date.now()}.pdf`);
+    await page.pdf({
+      path: samplePdfPath,
+      format: 'A4',
+      printBackground: true,
+    });
+    await page.emulateMedia({ media: 'screen' });
+    expect(fs.statSync(samplePdfPath).size).toBeGreaterThan(2000);
+
+    // Navigate cleanly to Home (resets Chromium print viewport from page.pdf()) and convert the PDF
+    await page.goto('/');
+    await expect(page.locator('#btn-convert-pdf-docx')).toBeVisible();
+    await page.locator('#input-pdf-to-docx').setInputFiles(samplePdfPath);
+
+    // 1) Verify editor opened the converted PDF with 100% intact Thai words, headings, and table cells — and is editable!
+    await expect(page.locator('#input-doc-title')).toHaveValue(/sample-thai-/);
+    const editor = page.locator('.tiptap');
+    await expect(editor).toContainText('บันทึกข้อความ');
+    await expect(editor).toContainText('ความเป็นมาและวัตถุประสงค์');
+    await expect(editor).toContainText('ขออนุมัติแนวทางการจัดทำเอกสารมาตรฐานรูปแบบดิจิทัล');
+    await expect(editor).toContainText('จัดเตรียมแม่แบบเอกสารหลักประจำฝ่าย');
+    await expect(editor).toContainText('ทีมเทคโนโลยีสารสนเทศ');
+    await expect(editor.locator('table').first()).toBeVisible();
+
+    // 2) Edit the converted PDF document directly to confirm full editability
+    await editor.click();
+    await page.keyboard.press('End');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('แก้ไขเพิ่มเติมหลังแปลงจากไฟล์ PDF สำเร็จ');
+    await expect(editor).toContainText('แก้ไขเพิ่มเติมหลังแปลงจากไฟล์ PDF สำเร็จ');
+
+    // 3) Export the edited PDF-converted document to .docx and re-import to verify zero character/table loss
+    await page.locator('#btn-file-export').click();
+    const docxDownloadPromise = page.waitForEvent('download');
+    await page.locator('#btn-export-docx').click();
+    const docxDownload = await docxDownloadPromise;
+    expect(docxDownload.suggestedFilename()).toMatch(/\.docx$/);
+
+    const convertedDocxPath = path.join('/tmp', `converted-from-pdf-${Date.now()}.docx`);
+    await docxDownload.saveAs(convertedDocxPath);
+    expect(fs.statSync(convertedDocxPath).size).toBeGreaterThan(1500);
+
+    await page.locator('#btn-back-home').click();
+    await page.locator('#input-import-file').setInputFiles(convertedDocxPath);
+
+    await expect(page.locator('.tiptap')).toContainText('บันทึกข้อความ');
+    await expect(page.locator('.tiptap')).toContainText('ความเป็นมาและวัตถุประสงค์');
+    await expect(page.locator('.tiptap')).toContainText('จัดเตรียมแม่แบบเอกสารหลักประจำฝ่าย');
+    await expect(page.locator('.tiptap')).toContainText('ทีมเทคโนโลยีสารสนเทศ');
+    await expect(page.locator('.tiptap')).toContainText('แก้ไขเพิ่มเติมหลังแปลงจากไฟล์ PDF สำเร็จ');
+    expect(errors).toEqual([]);
+  });
 });

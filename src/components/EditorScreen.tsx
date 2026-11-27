@@ -1492,6 +1492,7 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
               </button>
 
               <button
+                id="btn-modal-open-file"
                 type="button"
                 className="fw-export-card"
                 onClick={() => importFileInputRef.current?.click()}
@@ -1499,26 +1500,29 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
                 <Upload size={22} color="var(--color-accent)" style={{ flexShrink: 0 }} />
                 <div>
                   <div style={{ fontWeight: 700, fontSize: 'var(--text-sm)' }}>
-                    เปิดไฟล์จากเครื่อง...
+                    เปิด / แปลงไฟล์ PDF & .docx
                   </div>
                   <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                    นำเข้า .docx, .html, .txt หรือ .md เป็นเอกสารใหม่
+                    นำเข้า .pdf, .docx, .html, .txt หรือ .md มาแก้ไขต่อทันที
                   </div>
                 </div>
               </button>
               <input
                 ref={importFileInputRef}
                 type="file"
-                accept=".docx,.html,.htm,.txt,.md"
+                accept=".pdf,.docx,.html,.htm,.txt,.md,application/pdf"
                 style={{ display: 'none' }}
                 onChange={async (e) => {
                   const f = e.target.files?.[0];
                   e.target.value = '';
                   if (!f) return;
                   try {
+                    if (f.name.toLowerCase().endsWith('.pdf')) {
+                      notify('กำลังแปลงไฟล์ PDF ให้แก้ไขได้...');
+                    }
                     const imported = await importDocumentFile(f, docRecord.folderId);
                     setFileModalOpen(false);
-                    notify(`เปิดไฟล์ "${imported.title}" แล้ว`);
+                    notify(`เปิดไฟล์ "${imported.title}" พร้อมแก้ไขแล้ว`);
                     onSwitchDocument(imported.id);
                   } catch (err) {
                     notify(err instanceof Error ? err.message : 'ไม่สามารถเปิดไฟล์ได้');

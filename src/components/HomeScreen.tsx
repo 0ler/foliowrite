@@ -16,12 +16,14 @@ import {
   Search,
   Trash2,
   Upload,
+  FileUp,
   X,
 } from 'lucide-react';
 import type { DocumentRecord, DocumentTemplate, FolderRecord } from '../types';
 import { STARTER_TEMPLATES } from '../lib/templates';
 import { formatRelativeDate } from '../lib/metrics';
 import {
+  convertPdfFileToDocxAndOpen,
   downloadWorkspaceBackupJson,
   exportDocumentAsDocx,
   importDocumentFile,
@@ -79,7 +81,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   const [newFolderName, setNewFolderName] = useState('');
   const [newFolderColor, setNewFolderColor] = useState(FOLDER_COLORS[0]);
 
+  const [isImporting, setIsImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pdfToDocxInputRef = useRef<HTMLInputElement>(null);
   const backupInputRef = useRef<HTMLInputElement>(null);
 
   const activeFolderId = filter.kind === 'folder' ? filter.folderId : null;
@@ -138,13 +142,43 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
+    setIsImporting(true);
     try {
+      const isPdf = file.name.toLowerCase().endsWith('.pdf');
+      if (isPdf) {
+        notify('กำลังวิเคราะห์โครงสร้างหน้าและแปลงไฟล์ PDF ให้แก้ไขได้...');
+      }
       const created = await importDocumentFile(file, activeFolderId);
       await onRefresh();
-      notify(`นำเข้า "${created.title}" เรียบร้อยแล้ว`);
+      notify(
+        isPdf
+          ? `แปลง PDF "${created.title}" เป็นเอกสารแก้ไขได้เรียบร้อยแล้ว`
+          : `นำเข้า "${created.title}" เรียบร้อยแล้ว`,
+      );
       onOpenDocument(created.id);
     } catch (err) {
       notify(err instanceof Error ? err.message : 'ไม่สามารถนำเข้าไฟล์นี้ได้');
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const handlePdfToDocxConvert = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setIsImporting(true);
+    try {
+      notify('กำลังแปลง PDF เป็นไฟล์ .docx และเปิดหน้าแก้ไข...');
+      const created = await convertPdfFileToDocxAndOpen(file, activeFolderId, true);
+      await onRefresh();
+      await new Promise((resolve) => window.setTimeout(resolve, 180));
+      notify(`แปลงและดาวน์โหลด "${created.title}.docx" สำเร็จ พร้อมแก้ไขต่อได้ทันที!`);
+      onOpenDocument(created.id);
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'ไม่สามารถแปลงไฟล์ PDF ได้');
+    } finally {
+      setIsImporting(false);
     }
   };
 
@@ -214,19 +248,46 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             สร้างเอกสารใหม่
           </button>
           <button
+            id="btn-convert-pdf-docx"
+            type="button"
+            className="fw-btn fw-btn--secondary"
+            style={{
+              width: '100%',
+              justifyContent: 'center',
+              borderColor: 'var(--color-accent)',
+              color: 'var(--color-accent)',
+              fontWeight: 600,
+            }}
+            disabled={isImporting}
+            onClick={() => pdfToDocxInputRef.current?.click()}
+          >
+            <FileUp size={16} />
+            {isImporting ? 'กำลังแปลงไฟล์...' : 'แปลง PDF เป็น .docx แก้ไขได้'}
+          </button>
+          <input
+            id="input-pdf-to-docx"
+            ref={pdfToDocxInputRef}
+            type="file"
+            accept=".pdf,application/pdf"
+            style={{ display: 'none' }}
+            onChange={handlePdfToDocxConvert}
+          />
+          <button
             id="btn-import-doc"
             type="button"
             className="fw-btn fw-btn--secondary"
             style={{ width: '100%', justifyContent: 'center' }}
+            disabled={isImporting}
             onClick={handleImportClick}
           >
             <Upload size={16} />
-            นำเข้าไฟล์ (.docx / .txt)
+            นำเข้าไฟล์ (.pdf / .docx / .txt)
           </button>
           <input
+            id="input-import-file"
             ref={fileInputRef}
             type="file"
-            accept=".docx,.html,.htm,.txt,.md"
+            accept=".pdf,.docx,.html,.htm,.txt,.md,application/pdf"
             style={{ display: 'none' }}
             onChange={handleFileImport}
           />
