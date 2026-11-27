@@ -1,0 +1,130 @@
+import { expect, test } from '@playwright/test';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+
+test.describe('FolioWrite Cross-Device E2E Flows (replica-test)', () => {
+  test('F01 + F03 + F05: Home -> Create from Template -> Edit, Table, Find/Replace, Export .docx & Screenshots', async ({
+    page,
+  }) => {
+    const errors: string[] = [];
+    page.on('console', (msg) => {
+      if (msg.type() === 'error') errors.push(msg.text());
+    });
+    page.on('pageerror', (err) => errors.push(err.message));
+
+    await page.goto('/');
+    await expect(page.getByRole('heading', { name: 'FolioWrite', exact: true })).toBeVisible();
+    await expect(page.getByText('คู่มือเริ่มต้นใช้งาน FolioWrite (ข้ามอุปกรณ์)').first()).toBeVisible();
+
+    const screenshotDir = path.resolve('replica/clone-screens');
+    fs.mkdirSync(screenshotDir, { recursive: true });
+    await page.screenshot({ path: path.join(screenshotDir, 'S01-desktop.png') });
+
+    // Create a new document from Thai Memo template
+    await page.locator('#tpl-thai-memo').click();
+    await expect(page.locator('#input-doc-title')).toHaveValue('บันทึกข้อความภายใน');
+
+    // Type additional content & apply bold
+    const editorArea = page.locator('.tiptap');
+    await editorArea.click();
+    await page.keyboard.press('End');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('ข้อความทดสอบอัตโนมัติสำหรับตรวจสอบการนับคำภาษาไทยและตาราง');
+
+    // Switch to Insert tab and insert a 2x2 table
+    await page.locator('#ribbon-tab-insert').click();
+    await page.locator('#btn-insert-table').click();
+    await page.locator('#input-table-rows').fill('2');
+    await page.locator('#input-table-cols').fill('2');
+    await page.locator('#btn-confirm-insert-table').click();
+
+    // Verify Outline Pane on View tab
+    await page.locator('#ribbon-tab-view').click();
+    if (!(await page.getByLabel('สารบัญเอกสาร').isVisible())) {
+      await page.locator('#btn-toggle-outline').click();
+    }
+    await expect(page.getByLabel('สารบัญเอกสาร')).toBeVisible();
+
+    // Switch back to Home tab and capture S02 desktop editor screenshot
+    await page.locator('#ribbon-tab-home').click();
+    await page.screenshot({ path: path.join(screenshotDir, 'S02-desktop.png') });
+
+    // F05: Find & Replace
+    await page.locator('#btn-find-toggle').click();
+    await page.locator('#input-find-query').fill('ข้อความทดสอบอัตโนมัติ');
+    await page.locator('#input-replace-query').fill('เนื้อหาผ่านการตรวจสอบแล้ว');
+    await page.locator('#btn-replace-all').click();
+    await expect(editorArea).toContainText('เนื้อหาผ่านการตรวจสอบแล้ว');
+
+    // F03: Export .docx download verification + F02 round-trip re-import!
+    await page.locator('#btn-file-export').click();
+    await page.screenshot({ path: path.join(screenshotDir, 'S03-export-modal.png') });
+
+    const downloadPromise = page.waitForEvent('download');
+    await page.locator('#btn-export-docx').click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe('บันทึกข้อความภายใน.docx');
+
+    const tempDocxPath = path.join('/tmp', `roundtrip-${Date.now()}.docx`);
+    await download.saveAs(tempDocxPath);
+    const stat = fs.statSync(tempDocxPath);
+    expect(stat.size).toBeGreaterThan(1000);
+
+    // Return Home and verify persistence + search + folder creation + .docx import
+    await page.locator('#btn-back-home').click();
+    await expect(page.getByRole('heading', { name: /เอกสารทั้งหมด/ })).toBeVisible();
+
+    // F04: Create Folder
+    await page.locator('#btn-open-folder-modal').click();
+    await page.locator('#input-new-folder-name').fill('ฝ่ายบริหาร');
+    await page.locator('#btn-submit-folder').click();
+    await expect(page.getByRole('button', { name: /ฝ่ายบริหาร/ })).toBeVisible();
+
+    // F04: Search
+    await page.locator('#input-search-docs').fill('เนื้อหาผ่านการตรวจสอบแล้ว');
+    await expect(page.getByText('บันทึกข้อความภายใน').first()).toBeVisible();
+    await page.locator('#input-search-docs').fill('');
+
+    // F02: Import the exported .docx file back into FolioWrite!
+    const fileChooserPromise = page.waitForEvent('filechooser');
+    await page.locator('#btn-import-doc').click();
+    const fileChooser = await fileChooserPromise;
+    await fileChooser.setFiles(tempDocxPath);
+
+    await expect(page.locator('.tiptap')).toContainText('เนื้อหาผ่านการตรวจสอบแล้ว');
+    expect(errors).toEqual([]);
+  });
+
+  test('Mobile Viewport (390x844): Reflow View, Mobile Sticky Toolbar & Zero Horizontal Overflow', async ({
+    browser,
+  }) => {
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      isMobile: true,
+      hasTouch: true,
+    });
+    const page = await context.newPage();
+    await page.goto('/');
+
+    const screenshotDir = path.resolve('replica/clone-screens');
+    await page.screenshot({ path: path.join(screenshotDir, 'S01-mobile.png') });
+
+    // Open mobile navigation drawer
+    await page.locator('#btn-mobile-menu').click();
+    await expect(page.locator('#btn-new-blank-doc')).toBeVisible();
+    await page.locator('#btn-new-blank-doc').click();
+
+    // Verify Mobile Reflow sheet is active & mobile toolbar is visible
+    await expect(page.locator('.fw-sheet--reflow')).toBeVisible();
+    await expect(page.getByRole('toolbar', { name: 'แถบเครื่องมือด่วนบนมือถือ' })).toBeVisible();
+
+    // Check that body does not overflow horizontally on 390px phone
+    const hasHorizontalOverflow = await page.evaluate(() => {
+      return document.documentElement.scrollWidth > window.innerWidth + 2;
+    });
+    expect(hasHorizontalOverflow).toBe(false);
+
+    await page.screenshot({ path: path.join(screenshotDir, 'S02-mobile.png') });
+    await context.close();
+  });
+});

@@ -1,0 +1,28 @@
+{
+  "name": "FolioWrite",
+  "tagline": "เอกสารครบเครื่อง ใช้ได้ทุกอุปกรณ์ เก็บข้อมูลในเครื่องคุณเอง",
+  "avoid": [
+    "Microsoft Word",
+    "MS Word",
+    "Word Online",
+    "Office 365",
+    "Microsoft 365",
+    "OneDrive",
+    "SharePoint",
+    "Calibri",
+    "Aptos"
+  ],
+  "domains": [
+    "office.com",
+    "microsoft.com",
+    "live.com",
+    "sharepoint.com",
+    "onedrive.com"
+  ],
+  "colors": [
+    "#185abd",
+    "#2b579a",
+    "#103f91",
+    "#0078d4"
+  ]
+}

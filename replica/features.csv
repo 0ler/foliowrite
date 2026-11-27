@@ -1,0 +1,37 @@
+feature,area,priority,original,clone,notes
+Create blank document in one click,home,must,yes,yes,Implemented on sidebar & template strip
+Starter templates (Meeting Notes / Proposal / Letter / Thai Memo),home,must,yes,yes,5 bilingual starter templates in src/lib/templates.ts
+Document list with Recent and Pinned filters,home,must,yes,yes,Grid & Table list modes with Pin/Unpin and Duplicate
+Folder organization (create rename filter delete),home,must,yes,yes,Custom color-coded folders with non-destructive delete
+Full-text search across document titles and body,home,must,yes,yes,Instant search across title and plainText
+Trash bin with restore and permanent delete,home,must,yes,yes,Soft-delete to Trash + Restore + Empty Trash
+Rich text inline formatting (Bold Italic Underline Strikethrough Sub/Superscript),editor,must,yes,yes,Ribbon + keyboard shortcuts + mobile quick bar
+Block styles & Headings (Normal Title H1 H2 H3 Blockquote),editor,must,yes,yes,Synced dropdown & live outline tree
+Font family & Font size selector (Thai + Latin fonts),editor,must,yes,yes,Sarabun / IBM Plex Sans Thai / Inter / Source Serif 4 / JetBrains Mono + 10pt-36pt
+Text color and Highlight color pickers,editor,must,yes,yes,Multicolor text & highlight swatches
+Paragraph alignment (Left Center Right Justify) & Line spacing,editor,must,yes,yes,4 alignments + 1.25 to 2.0 line spacing
+Bulleted lists Numbered lists and Indent/Outdent,editor,must,yes,yes,Bullet / Ordered / Interactive Tasklists
+Undo and Redo history with keyboard shortcuts,editor,must,yes,yes,Toolbar buttons + Ctrl/Cmd+Z/Y
+Insert and edit Tables (add/delete rows & columns header cells),insert,must,yes,yes,Custom N x M table modal + contextual row/column controls
+Insert local Images with resize alignment and alt text,insert,must,yes,yes,Base64 local storage + 220px/420px/620px presets + .docx image embedding
+Page Setup (A4 / Letter Portrait / Landscape Normal/Narrow/Wide margins),layout,must,yes,yes,Reflected live on sheet canvas and exported .docx sections
+Live Word Character and Reading-time count in status bar,editor,must,yes,yes,Uses Intl.Segmenter('th') for accurate Thai + English word count
+Import existing .docx .html and .txt files locally,io,must,yes,yes,Powered by mammoth + HTML/Markdown/Text parsers
+Export real .docx file plus Print / Save as PDF .html and .txt,io,must,yes,yes,ECMA-376 OpenXML .docx builder + vector @media print PDF
+Responsive cross-device UI (Desktop Ribbon + Mobile bottom formatting bar + Mobile Reflow view),responsive,should,yes,yes,Auto-reflows < 768px with sticky bottom touch toolbar
+Progressive Web App (installable manifest + offline service worker),responsive,should,yes,yes,Configured via vite-plugin-pwa with precached assets
+Find and Replace bar with match navigation and Replace All,editor,should,yes,yes,Ctrl/Cmd+F floating bar with match counter & Replace All
+Document Outline / Navigation pane jumping to H1-H3 headings,view,should,yes,yes,Collapsible sidebar jumping smoothly to headings
+Insert Hyperlinks Horizontal dividers and Page breaks,insert,should,yes,yes,Link modal + HR + dashed PageBreak node (exports to .docx & print CSS)
+Ruler bar and Zoom controls (75% to 150%) + Focus / Read mode,view,should,yes,yes,Ruler track + 70%-150% zoom + Read-only mode
+Local Auto-save to IndexedDB with instant status indicator,storage,should,yes,yes,380ms debounced IndexedDB persistence + Ctrl+S flush
+Local Version Snapshots (save named checkpoint & restore),storage,should,yes,yes,Named checkpoints stored in snapshots object store
+Clear formatting tool and Format painter / quick style reset,editor,should,yes,yes,One-click clear marks & reset block style
+Darkworkspace canvas backdrop toggle,view,could,yes,yes,Eye-comfort dark canvas mode in View tab
+Export Markdown (.md) and full Workspace JSON backup/restore,io,could,no,yes,Extra local-first cross-device portability feature
+Insert Checklist (interactive task items),insert,could,yes,yes,TaskList + TaskItem extensions
+Word Count detailed modal (words characters without spaces paragraphs pages),editor,could,yes,yes,Clickable status bar opens detailed breakdown modal
+OneDrive and SharePoint cloud sync,cloud,could,yes,skip,Scoped out: user chose Local-first zero-login architecture
+Real-time multi-user cloud co-authoring,collaboration,could,yes,skip,Scoped out for v1 local-first build
+VBA Macros (.docm) execution engine,automation,could,yes,skip,Proprietary desktop runtime out of web scope
+Office Add-in third-party marketplace,integrations,could,yes,skip,Third-party store network cannot be cloned
