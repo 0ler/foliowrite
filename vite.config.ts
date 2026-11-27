@@ -2,7 +2,10 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 
+const basePath = process.env.GITHUB_PAGES === 'true' ? '/foliowrite/' : '/';
+
 export default defineConfig({
+  base: basePath,
   plugins: [
     react(),
     VitePWA({
@@ -15,10 +18,11 @@ export default defineConfig({
         theme_color: '#0d6b5e',
         background_color: '#f4f5f4',
         display: 'standalone',
-        start_url: '/',
+        start_url: basePath,
+        scope: basePath,
         icons: [
           {
-            src: '/foliowrite-icon.svg',
+            src: `${basePath}foliowrite-icon.svg`,
             sizes: 'any',
             type: 'image/svg+xml',
             purpose: 'any maskable',

@@ -186,7 +186,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div className="fw-brand">
-            <img src="/foliowrite-icon.svg" alt="โลโก้ FolioWrite" className="fw-brand__logo" />
+            <img src="./foliowrite-icon.svg" alt="โลโก้ FolioWrite" className="fw-brand__logo" />
             <div>
               <h1 className="fw-brand__title">FolioWrite</h1>
               <p className="fw-brand__subtitle">Local-First • ทุกอุปกรณ์</p>
