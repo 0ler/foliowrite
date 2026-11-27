@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
+import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
+import type { Transaction } from '@tiptap/pm/state';
 import Underline from '@tiptap/extension-underline';
 import { TextStyle } from '@tiptap/extension-text-style';
 import Color from '@tiptap/extension-color';
@@ -37,6 +39,8 @@ import {
   FileDown,
   FileSpreadsheet,
   FileText,
+  FilePlus2,
+  PanelTop,
   History,
   Highlighter,
   ImagePlus,
@@ -137,6 +141,12 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
   const [showPageNumbers, setShowPageNumbers] = useState<boolean>(
     docRecord.showPageNumbers ?? true,
   );
+  const [footerText, setFooterText] = useState<string>(docRecord.footerText ?? '');
+  const [showHeader, setShowHeader] = useState<boolean>(docRecord.showHeader ?? true);
+  const [showFooter, setShowFooter] = useState<boolean>(docRecord.showFooter ?? true);
+  const [editingHeader, setEditingHeader] = useState(false);
+  const [editingFooter, setEditingFooter] = useState(false);
+  const [hfModalOpen, setHfModalOpen] = useState(false);
 
   // View state (mobileReflow defaults to false so phones see the FULL scaled paper sheet!)
   const [zoom, setZoom] = useState<number>(100);
@@ -179,15 +189,31 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
   const importFileInputRef = useRef<HTMLInputElement>(null);
   const sheetContainerRef = useRef<HTMLDivElement>(null);
   const sheetElementRef = useRef<HTMLDivElement>(null);
+  const pendingPatchRef = useRef<Partial<DocumentRecord>>({});
+
+  // Auto-pagination plumbing (refs so the editor's onUpdate closure always sees fresh values)
+  const paginateFnRef = useRef<() => void>(() => {});
+  const paginateRafRef = useRef<number | null>(null);
+  const autoChainRef = useRef(0);
+  const schedulePagination = useCallback(() => {
+    if (paginateRafRef.current !== null) return;
+    paginateRafRef.current = window.requestAnimationFrame(() => {
+      paginateRafRef.current = null;
+      paginateFnRef.current();
+    });
+  }, []);
 
   const scheduleSave = useCallback(
     (patch: Partial<DocumentRecord>) => {
       setSaveStatus('saving');
+      pendingPatchRef.current = { ...pendingPatchRef.current, ...patch };
       if (saveTimerRef.current) {
         window.clearTimeout(saveTimerRef.current);
       }
       saveTimerRef.current = window.setTimeout(async () => {
-        await onSavePatch(patch);
+        const merged = pendingPatchRef.current;
+        pendingPatchRef.current = {};
+        await onSavePatch(merged);
         setSaveStatus('saved');
       }, 380);
     },
@@ -198,6 +224,8 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
     extensions: [
       StarterKit.configure({
         heading: { levels: [1, 2, 3] },
+        link: false,
+        underline: false,
       }),
       Underline,
       TextStyle,
@@ -234,10 +262,14 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
     ],
     content: docRecord.contentHtml || '<p></p>',
     editable: !readOnlyMode,
-    onUpdate: ({ editor: ed }) => {
+    onUpdate: ({ editor: ed, transaction }) => {
+      if (!transaction.getMeta('fwAutoPaginate')) {
+        autoChainRef.current = 0;
+      }
       const html = ed.getHTML();
       setLiveHtml(html);
       scheduleSave({ contentHtml: html });
+      schedulePagination();
     },
     onSelectionUpdate: () => {
       setSelectionTick((t) => t + 1);
@@ -290,6 +322,9 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
       docRecord.headerText ?? (docRecord.title === 'เอกสารไม่มีชื่อ' ? '' : docRecord.title),
     );
     setShowPageNumbers(docRecord.showPageNumbers ?? true);
+    setFooterText(docRecord.footerText ?? '');
+    setShowHeader(docRecord.showHeader ?? true);
+    setShowFooter(docRecord.showFooter ?? true);
     setLiveHtml(docRecord.contentHtml);
     if (editor && editor.getHTML() !== docRecord.contentHtml) {
       editor.commands.setContent(docRecord.contentHtml || '<p></p>');
@@ -528,11 +563,102 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
     scheduleSave({ headerText: val });
   };
 
+  const handleFooterTextChange = (val: string) => {
+    setFooterText(val);
+    scheduleSave({ footerText: val });
+  };
+
+  const applyHeaderFooterPatch = async (patch: {
+    headerText?: string;
+    footerText?: string;
+    showHeader?: boolean;
+    showFooter?: boolean;
+    showPageNumbers?: boolean;
+  }) => {
+    if (patch.headerText !== undefined) setHeaderText(patch.headerText);
+    if (patch.footerText !== undefined) setFooterText(patch.footerText);
+    if (patch.showHeader !== undefined) setShowHeader(patch.showHeader);
+    if (patch.showFooter !== undefined) setShowFooter(patch.showFooter);
+    if (patch.showPageNumbers !== undefined) setShowPageNumbers(patch.showPageNumbers);
+    await onSavePatch(patch);
+  };
+
+  const HEADER_FOOTER_PRESETS: Array<{
+    id: string;
+    label: string;
+    description: string;
+    patch: () => {
+      headerText: string;
+      footerText: string;
+      showHeader: boolean;
+      showFooter: boolean;
+      showPageNumbers: boolean;
+    };
+  }> = [
+    {
+      id: 'standard',
+      label: 'มาตรฐาน',
+      description: 'หัวกระดาษชื่อเอกสาร + เลขหน้าท้ายกระดาษ',
+      patch: () => ({
+        headerText: title.trim() && title !== 'เอกสารไม่มีชื่อ' ? title.trim() : headerText,
+        footerText: '',
+        showHeader: true,
+        showFooter: true,
+        showPageNumbers: true,
+      }),
+    },
+    {
+      id: 'official',
+      label: 'เอกสารราชการ/บริษัท',
+      description: 'ชื่อหน่วยงานด้านบน + ข้อความลับเฉพาะด้านล่าง',
+      patch: () => ({
+        headerText: headerText.trim() || 'ชื่อหน่วยงาน / บริษัท',
+        footerText: 'เอกสารภายใน — ห้ามเผยแพร่',
+        showHeader: true,
+        showFooter: true,
+        showPageNumbers: true,
+      }),
+    },
+    {
+      id: 'pagenum-only',
+      label: 'เลขหน้าอย่างเดียว',
+      description: 'ไม่มีหัวกระดาษ แสดงเฉพาะเลขหน้า',
+      patch: () => ({
+        headerText,
+        footerText: '',
+        showHeader: false,
+        showFooter: true,
+        showPageNumbers: true,
+      }),
+    },
+    {
+      id: 'clean',
+      label: 'ไม่มีหัว/ท้ายกระดาษ',
+      description: 'กระดาษเปล่าสะอาดตา',
+      patch: () => ({
+        headerText,
+        footerText,
+        showHeader: false,
+        showFooter: false,
+        showPageNumbers: false,
+      }),
+    },
+  ];
+
+  const insertNewPage = () => {
+    if (!editor || readOnlyMode) return;
+    editor.chain().focus().insertPageBreak().scrollIntoView().run();
+    notify('สร้างหน้าใหม่แล้ว');
+  };
+
   const currentDocSnapshot = (): DocumentRecord => ({
     ...docRecord,
     title: title.trim() || 'เอกสารไม่มีชื่อ',
     contentHtml: editor ? editor.getHTML() : liveHtml,
     headerText,
+    footerText,
+    showHeader,
+    showFooter,
     showPageNumbers,
     pageSize,
     orientation,
@@ -551,20 +677,227 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
         ? 816
         : 794;
 
+  const pageHeightPx =
+    orientation === 'landscape'
+      ? pageSize === 'Letter'
+        ? 816
+        : 794
+      : pageSize === 'Letter'
+        ? 1056
+        : 1123;
+  const marginPads =
+    margins === 'narrow'
+      ? { top: 22, bottom: 52 }
+      : margins === 'wide'
+        ? { top: 32, bottom: 92 }
+        : { top: 28, bottom: 84 };
+
   // Compute auto-fit scale so phones (e.g. 390px) see the ENTIRE paper sheet edge-to-edge cleanly!
   const availableCanvasWidth = Math.max(280, viewportWidth - (viewportWidth < 768 ? 20 : 48));
   const autoFitScale = Math.min(1, availableCanvasWidth / sheetPixelWidth);
   const effectiveScale = mobileReflow ? 1 : autoFitScale * (zoom / 100);
 
-  // Escape header text for CSS custom property content string (exact match with Sheet 1 header!)
-  const escapedCssHeaderLabel = headerText.trim()
-    ? `"${headerText.trim().replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
-    : '""';
+  // ---------------------------------------------------------------------------
+  // AUTO-PAGINATION: typing past the bottom of a page creates a real new page.
+  // ---------------------------------------------------------------------------
+  const PAGE_GAP_PX = 28;
+  const pageGeometryRef = useRef({
+    scale: 1,
+    pageH: 1123,
+    padBottom: 84,
+    reflow: false,
+  });
+  pageGeometryRef.current = {
+    scale: effectiveScale,
+    pageH: pageHeightPx,
+    padBottom: marginPads.bottom,
+    reflow: mobileReflow,
+  };
+
+  paginateFnRef.current = () => {
+    const sheet = sheetElementRef.current;
+    if (!editor || editor.isDestroyed || !sheet) return;
+    const { scale, pageH, padBottom, reflow } = pageGeometryRef.current;
+    const view = editor.view;
+    if (reflow) {
+      sheet.style.minHeight = '';
+      return;
+    }
+    const pitch = pageH + PAGE_GAP_PX;
+    const sheetTop = sheet.getBoundingClientRect().top;
+    const toY = (clientY: number) => (clientY - sheetTop) / scale;
+    const limitFor = (pageIdx: number) => pageIdx * pitch + pageH - padBottom;
+
+    type Item = { node: ProseMirrorNode; offset: number; dom: HTMLElement | null; isBreak: boolean };
+    const items: Item[] = [];
+    view.state.doc.forEach((node, offset) => {
+      const dom = view.nodeDOM(offset);
+      items.push({
+        node,
+        offset,
+        dom: dom instanceof HTMLElement ? dom : null,
+        isBreak: node.type.name === 'pageBreak',
+      });
+    });
+
+    // 1) Size every page seam so its footer lands exactly at the bottom of its sheet
+    const breakReads = items
+      .filter((it) => it.isBreak && it.dom)
+      .map((it) => {
+        const fillEl = it.dom!.querySelector<HTMLElement>('.fw-page-break__fill');
+        const oldFill = fillEl
+          ? (parseFloat(fillEl.style.height || '0') || 0) + (parseFloat(fillEl.style.marginTop || '0') || 0)
+          : 0;
+        return { fillEl, oldFill, top: toY(it.dom!.getBoundingClientRect().top) };
+      });
+    let shift = 0;
+    breakReads.forEach((b, pageIdx) => {
+      if (!b.fillEl) return;
+      const top = b.top + shift;
+      const newFill = Math.max(-40, Math.round(limitFor(pageIdx) - top));
+      if (Math.abs(newFill - b.oldFill) >= 1) {
+        b.fillEl.style.height = `${Math.max(0, newFill)}px`;
+        b.fillEl.style.marginTop = newFill < 0 ? `${newFill}px` : '0px';
+      }
+      shift += newFill - b.oldFill;
+    });
+    const pageCount = breakReads.length + 1;
+    const targetMinHeight = `${pageCount * pitch - PAGE_GAP_PX}px`;
+    if (sheet.style.minHeight !== targetMinHeight) {
+      sheet.style.minHeight = targetMinHeight;
+    }
+
+    if (readOnlyMode || autoChainRef.current > 80) return;
+    const pageBreakType = view.state.schema.nodes.pageBreak;
+    if (!pageBreakType) return;
+
+    const dispatchAuto = (tr: Transaction) => {
+      autoChainRef.current += 1;
+      tr.setMeta('addToHistory', false);
+      tr.setMeta('fwAutoPaginate', true);
+      view.dispatch(tr);
+    };
+
+    // 2) Overflow: push the first block that crosses the page bottom onto a new page
+    let pageIdx = 0;
+    let firstOnPage = true;
+    for (const it of items) {
+      if (it.isBreak) {
+        pageIdx += 1;
+        firstOnPage = true;
+        continue;
+      }
+      if (!it.dom) {
+        firstOnPage = false;
+        continue;
+      }
+      const rect = it.dom.getBoundingClientRect();
+      const limit = limitFor(pageIdx);
+      if (toY(rect.bottom) > limit + 1) {
+        if (!firstOnPage) {
+          dispatchAuto(view.state.tr.insert(it.offset, pageBreakType.create({ auto: true })));
+          return;
+        }
+        // A single block taller than the page: split a long paragraph at the line that overflows
+        if (it.node.isTextblock && it.node.content.size > 1) {
+          const probe = view.posAtCoords({
+            left: rect.left + 2,
+            top: sheetTop + limit * scale - 2,
+          });
+          const start = it.offset + 1;
+          const end = it.offset + it.node.nodeSize - 1;
+          if (probe && probe.pos > start && probe.pos < end) {
+            const tr = view.state.tr.split(probe.pos);
+            tr.insert(probe.pos + 1, pageBreakType.create({ auto: true }));
+            dispatchAuto(tr);
+            return;
+          }
+        }
+      }
+      firstOnPage = false;
+    }
+
+    // 3) Content shrank: drop auto page breaks that are no longer needed
+    pageIdx = 0;
+    for (let i = 0; i < items.length; i += 1) {
+      const it = items[i];
+      if (!it.isBreak) continue;
+      const isAuto = Boolean(it.node.attrs.auto);
+      if (isAuto) {
+        const prev = items[i - 1];
+        const next = items[i + 1];
+        const remove = () =>
+          dispatchAuto(view.state.tr.delete(it.offset, it.offset + it.node.nodeSize));
+        if (!prev || !next || prev.isBreak || next.isBreak || !prev.dom || !next.dom) {
+          remove();
+          return;
+        }
+        const prevRect = prev.dom.getBoundingClientRect();
+        const nextRect = next.dom.getBoundingClientRect();
+        const prevMb = parseFloat(getComputedStyle(prev.dom).marginBottom) || 0;
+        const projectedBottom = toY(prevRect.bottom) + prevMb + nextRect.height / scale;
+        if (projectedBottom <= limitFor(pageIdx) - 24) {
+          remove();
+          return;
+        }
+      }
+      pageIdx += 1;
+    }
+  };
+
+  // Re-run pagination whenever geometry or typography changes, and when content resizes (images load)
+  useEffect(() => {
+    schedulePagination();
+  }, [
+    editor,
+    schedulePagination,
+    effectiveScale,
+    pageHeightPx,
+    margins,
+    mobileReflow,
+    lineSpacing,
+    defaultFont,
+    showHeader,
+    showFooter,
+  ]);
+
+  useEffect(() => {
+    if (!editor || typeof ResizeObserver === 'undefined') return;
+    const dom = editor.view.dom as HTMLElement;
+    const ro = new ResizeObserver(() => schedulePagination());
+    ro.observe(dom);
+    if (document.fonts?.ready) {
+      document.fonts.ready.then(() => schedulePagination()).catch(() => {});
+    }
+    return () => ro.disconnect();
+  }, [editor, schedulePagination]);
+
+  useEffect(
+    () => () => {
+      if (paginateRafRef.current !== null) {
+        window.cancelAnimationFrame(paginateRafRef.current);
+        paginateRafRef.current = null;
+      }
+    },
+    [],
+  );
+
+  const toCssString = (val: string) =>
+    `"${val.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, ' ')}"`;
+
+  // Escape header/footer text for CSS custom property content strings (exact match with Sheet 1!)
+  const escapedCssHeaderLabel = showHeader && headerText.trim() ? toCssString(headerText.trim()) : '""';
+  const escapedCssFooterLabel = showFooter && footerText.trim() ? toCssString(footerText.trim()) : '""';
   const escapedCssPageNumPrefix = showPageNumbers ? '"หน้า "' : '""';
 
   const sheetSizeClass = `fw-sheet--${pageSize.toLowerCase()}-${orientation}`;
   const sheetMarginClass = `fw-sheet--margin-${margins}`;
   const currentImgAttrs = editor?.isActive('image') ? editor.getAttributes('image') : null;
+  const [hfFocusField, setHfFocusField] = useState<'header' | 'footer'>('header');
+  const openHeaderFooterSettings = (field: 'header' | 'footer' = 'header') => {
+    setHfFocusField(field);
+    setHfModalOpen(true);
+  };
 
   return (
     <div className={`fw-editor-shell ${darkCanvas ? 'fw-editor-shell--dark-canvas' : ''}`}>
@@ -816,6 +1149,18 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
               >
                 <ImagePlus size={16} />
                 <span>รูปภาพ</span>
+              </button>
+
+              <button
+                id="btn-new-page"
+                type="button"
+                className="fw-capsule-plus-img fw-capsule-new-page"
+                onClick={insertNewPage}
+                disabled={readOnlyMode}
+                title="สร้างหน้ากระดาษใหม่ต่อจากตำแหน่งเคอร์เซอร์"
+              >
+                <FilePlus2 size={16} />
+                <span>สร้างหน้าใหม่</span>
               </button>
 
               <button
@@ -1316,29 +1661,52 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
                     </div>
 
                     <div className="fw-tool-group">
-                      <span style={{ fontSize: 12, color: 'var(--color-text-muted)', padding: '0 6px' }}>
-                        หัวกระดาษซ้ำทุกแผ่น:
-                      </span>
-                      <input
-                        id="input-layout-header"
-                        type="text"
-                        className="fw-input"
-                        style={{ height: 32, width: 190, fontSize: 12, borderRadius: 999 }}
-                        placeholder="เช่น บันทึกข้อความ / ชื่อหน่วยงาน"
-                        value={headerText}
-                        onChange={(e) => handleHeaderTextChange(e.target.value)}
-                      />
+                      <button
+                        id="btn-header-footer-settings"
+                        type="button"
+                        className="fw-tool-btn"
+                        onClick={() => openHeaderFooterSettings('header')}
+                        title="ตั้งค่าหัวกระดาษและท้ายกระดาษ"
+                      >
+                        <PanelTop size={15} />
+                        หัว/ท้ายกระดาษ
+                      </button>
+                      <button
+                        id="btn-toggle-header"
+                        type="button"
+                        className={`fw-tool-btn ${showHeader ? 'fw-tool-btn--active' : ''}`}
+                        onClick={() => applyHeaderFooterPatch({ showHeader: !showHeader })}
+                      >
+                        แสดงหัวกระดาษ
+                      </button>
+                      <button
+                        id="btn-toggle-footer"
+                        type="button"
+                        className={`fw-tool-btn ${showFooter ? 'fw-tool-btn--active' : ''}`}
+                        onClick={() => applyHeaderFooterPatch({ showFooter: !showFooter })}
+                      >
+                        แสดงท้ายกระดาษ
+                      </button>
                       <button
                         id="btn-toggle-pagenum"
                         type="button"
                         className={`fw-tool-btn ${showPageNumbers ? 'fw-tool-btn--active' : ''}`}
-                        onClick={async () => {
-                          const next = !showPageNumbers;
-                          setShowPageNumbers(next);
-                          await onSavePatch({ showPageNumbers: next });
-                        }}
+                        onClick={() => applyHeaderFooterPatch({ showPageNumbers: !showPageNumbers })}
                       >
                         เลขหน้าอัตโนมัติ
+                      </button>
+                    </div>
+
+                    <div className="fw-tool-group">
+                      <button
+                        id="btn-layout-new-page"
+                        type="button"
+                        className="fw-tool-btn"
+                        onClick={insertNewPage}
+                        disabled={readOnlyMode}
+                      >
+                        <FilePlus2 size={15} />
+                        สร้างหน้าใหม่
                       </button>
                     </div>
                   </>
@@ -1572,9 +1940,23 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
                   transform: mobileReflow ? 'none' : `scale(${effectiveScale})`,
                   transformOrigin: 'top left',
                   '--doc-header-label': escapedCssHeaderLabel,
+                  '--doc-footer-label': escapedCssFooterLabel,
                   '--doc-pagenum-prefix': escapedCssPageNumPrefix,
                 } as React.CSSProperties
               }
+              data-show-header={showHeader ? 'true' : 'false'}
+              data-show-footer={showFooter ? 'true' : 'false'}
+              data-show-pagenum={showPageNumbers ? 'true' : 'false'}
+              onDoubleClick={(e) => {
+                const target = e.target as HTMLElement;
+                if (target.closest('.fw-page-break__header')) {
+                  e.preventDefault();
+                  openHeaderFooterSettings('header');
+                } else if (target.closest('.fw-page-break__footer')) {
+                  e.preventDefault();
+                  openHeaderFooterSettings('footer');
+                }
+              }}
               onClick={(e) => {
                 if (!readOnlyMode && !(e.target instanceof HTMLInputElement)) {
                   editor?.commands.focus();
@@ -1615,34 +1997,105 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
                 }
               }}
             >
-              {/* Print-only fixed running header that repeats on every printed / PDF page */}
-              {(headerText.trim() || showPageNumbers) && (
+              {/* Print-only fixed running header/footer that repeat on every printed / PDF page */}
+              {showHeader && headerText.trim() && (
                 <div className="fw-print-running-header" aria-hidden="true">
                   <span>{headerText.trim()}</span>
                   <span>{title}</span>
                 </div>
               )}
+              {showFooter && footerText.trim() && (
+                <div className="fw-print-running-footer" aria-hidden="true">
+                  <span>{footerText.trim()}</span>
+                </div>
+              )}
 
-              {/* Editable Running Header on Sheet 1 (mirrored automatically on every Page Break!) */}
+              {/* Running Header on Sheet 1 — double-click to edit (mirrored on every new page) */}
               <div
+                id="running-header"
                 className="fw-running-header"
                 onClick={(e) => e.stopPropagation()}
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  if (readOnlyMode) return;
+                  if (!showHeader) applyHeaderFooterPatch({ showHeader: true });
+                  setEditingHeader(true);
+                }}
                 role="region"
                 aria-label="หัวกระดาษประจำทุกหน้า"
+                title="ดับเบิลคลิกเพื่อแก้ไขหัวกระดาษ"
               >
-                <input
-                  id="input-running-header"
-                  type="text"
-                  className="fw-running-header__input"
-                  value={headerText}
-                  onChange={(e) => handleHeaderTextChange(e.target.value)}
-                  placeholder="คลิกพิมพ์หัวกระดาษ (จะแสดงซ้ำอัตโนมัติเมื่อขึ้นหน้าใหม่ทุกแผ่น)..."
-                  aria-label="ข้อความหัวกระดาษ"
-                />
-                {showPageNumbers && <span className="fw-running-header__pagenum">หน้า 1</span>}
+                {editingHeader ? (
+                  <input
+                    id="input-running-header"
+                    type="text"
+                    autoFocus
+                    className="fw-running-header__input"
+                    value={headerText}
+                    onChange={(e) => handleHeaderTextChange(e.target.value)}
+                    onBlur={() => setEditingHeader(false)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === 'Escape') {
+                        e.preventDefault();
+                        setEditingHeader(false);
+                      }
+                    }}
+                    placeholder="พิมพ์หัวกระดาษ (แสดงซ้ำทุกหน้าอัตโนมัติ)"
+                    aria-label="ข้อความหัวกระดาษ"
+                  />
+                ) : showHeader && headerText.trim() ? (
+                  <span className="fw-running-header__text">{headerText.trim()}</span>
+                ) : (
+                  <span className="fw-running-header__text fw-running-header__hint">
+                    ดับเบิลคลิกเพื่อเพิ่มหัวกระดาษ
+                  </span>
+                )}
               </div>
 
               <EditorContent editor={editor} />
+
+              {/* Running Footer = footer of the last page — double-click to edit */}
+              <div
+                id="running-footer"
+                className="fw-running-footer"
+                onClick={(e) => e.stopPropagation()}
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  if (readOnlyMode) return;
+                  if (!showFooter) applyHeaderFooterPatch({ showFooter: true });
+                  setEditingFooter(true);
+                }}
+                role="region"
+                aria-label="ท้ายกระดาษประจำทุกหน้า"
+                title="ดับเบิลคลิกเพื่อแก้ไขท้ายกระดาษ"
+              >
+                {editingFooter ? (
+                  <input
+                    id="input-running-footer"
+                    type="text"
+                    autoFocus
+                    className="fw-running-header__input"
+                    value={footerText}
+                    onChange={(e) => handleFooterTextChange(e.target.value)}
+                    onBlur={() => setEditingFooter(false)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === 'Escape') {
+                        e.preventDefault();
+                        setEditingFooter(false);
+                      }
+                    }}
+                    placeholder="พิมพ์ท้ายกระดาษ (แสดงซ้ำทุกหน้าอัตโนมัติ)"
+                    aria-label="ข้อความท้ายกระดาษ"
+                  />
+                ) : showFooter && footerText.trim() ? (
+                  <span className="fw-running-footer__text">{footerText.trim()}</span>
+                ) : (
+                  <span className="fw-running-footer__text fw-running-header__hint">
+                    ดับเบิลคลิกเพื่อเพิ่มท้ายกระดาษ
+                  </span>
+                )}
+                <span className="fw-running-header__pagenum fw-running-footer__pagenum" />
+              </div>
             </div>
           </div>
           </div>
@@ -1715,6 +2168,15 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
               aria-label="แทรกตาราง"
             >
               <TableIcon size={17} />
+            </button>
+            <button
+              id="btn-mobile-new-page"
+              type="button"
+              className="fw-tool-btn"
+              onClick={insertNewPage}
+              aria-label="สร้างหน้าใหม่"
+            >
+              <FilePlus2 size={17} />
             </button>
           </div>
         </div>
@@ -2059,6 +2521,151 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
                 onClick={() => setFileModalOpen(false)}
               >
                 ปิดหน้าต่าง
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Header & Footer Settings Modal */}
+      {hfModalOpen && (
+        <div className="fw-modal-backdrop" onClick={() => setHfModalOpen(false)}>
+          <div
+            className="fw-modal"
+            style={{ maxWidth: 480 }}
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="hf-modal-title"
+          >
+            <div className="fw-modal__header">
+              <h2 id="hf-modal-title" className="fw-modal__title">
+                ตั้งค่าหัวกระดาษและท้ายกระดาษ
+              </h2>
+              <button
+                type="button"
+                className="fw-btn fw-btn--ghost fw-btn--sm"
+                onClick={() => setHfModalOpen(false)}
+                aria-label="ปิดหน้าต่างตั้งค่า"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div>
+                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginBottom: 6 }}>
+                  รูปแบบสำเร็จรูป
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  {HEADER_FOOTER_PRESETS.map((preset) => (
+                    <button
+                      key={preset.id}
+                      id={`btn-hf-preset-${preset.id}`}
+                      type="button"
+                      className="fw-btn fw-btn--secondary fw-btn--sm"
+                      style={{
+                        justifyContent: 'flex-start',
+                        height: 'auto',
+                        padding: '8px 10px',
+                        flexDirection: 'column',
+                        alignItems: 'flex-start',
+                        gap: 2,
+                      }}
+                      onClick={() => applyHeaderFooterPatch(preset.patch())}
+                    >
+                      <span style={{ fontWeight: 600, fontSize: 12.5 }}>{preset.label}</span>
+                      <span style={{ fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 400 }}>
+                        {preset.description}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <label htmlFor="input-modal-header" style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>
+                    ข้อความหัวกระดาษ (แสดงซ้ำทุกหน้า)
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer' }}>
+                    <input
+                      id="chk-modal-show-header"
+                      type="checkbox"
+                      checked={showHeader}
+                      onChange={(e) => applyHeaderFooterPatch({ showHeader: e.target.checked })}
+                    />
+                    แสดงหัวกระดาษ
+                  </label>
+                </div>
+                <input
+                  id="input-modal-header"
+                  type="text"
+                  autoFocus={hfFocusField === 'header'}
+                  className="fw-input"
+                  placeholder="เช่น บันทึกข้อความ / ชื่อบริษัท / ชื่อโครงการ"
+                  value={headerText}
+                  onChange={(e) => handleHeaderTextChange(e.target.value)}
+                />
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <label htmlFor="input-modal-footer" style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>
+                    ข้อความท้ายกระดาษ (แสดงซ้ำทุกหน้า)
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer' }}>
+                    <input
+                      id="chk-modal-show-footer"
+                      type="checkbox"
+                      checked={showFooter}
+                      onChange={(e) => applyHeaderFooterPatch({ showFooter: e.target.checked })}
+                    />
+                    แสดงท้ายกระดาษ
+                  </label>
+                </div>
+                <input
+                  id="input-modal-footer"
+                  type="text"
+                  autoFocus={hfFocusField === 'footer'}
+                  className="fw-input"
+                  placeholder="เช่น เอกสารภายใน • ฝ่ายบริหาร"
+                  value={footerText}
+                  onChange={(e) => handleFooterTextChange(e.target.value)}
+                />
+              </div>
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--text-sm)', cursor: 'pointer' }}>
+                <input
+                  id="chk-modal-show-pagenum"
+                  type="checkbox"
+                  checked={showPageNumbers}
+                  onChange={(e) => applyHeaderFooterPatch({ showPageNumbers: e.target.checked })}
+                />
+                แสดงเลขหน้าอัตโนมัติที่ท้ายกระดาษ (หน้า 1, หน้า 2, ...)
+              </label>
+
+              <div
+                style={{
+                  fontSize: 12,
+                  color: 'var(--color-text-muted)',
+                  background: 'var(--color-surface-subtle)',
+                  padding: '8px 12px',
+                  borderRadius: 8,
+                }}
+              >
+                เคล็ดลับ: บนกระดาษสามารถ <strong>คลิกสองครั้ง (ดับเบิลคลิก)</strong> ที่บริเวณหัวกระดาษหรือท้ายกระดาษเพื่อพิมพ์แก้ไขได้ทันที
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                id="btn-close-hf-modal"
+                type="button"
+                className="fw-btn fw-btn--primary"
+                onClick={() => setHfModalOpen(false)}
+              >
+                เสร็จสิ้น
               </button>
             </div>
           </div>

@@ -117,6 +117,16 @@ export const PageBreakNode = Node.create({
   atom: true,
   selectable: true,
 
+  addAttributes() {
+    return {
+      auto: {
+        default: false,
+        parseHTML: (el: HTMLElement) => el.getAttribute('data-auto') === 'true',
+        renderHTML: (attrs: { auto?: boolean }) => (attrs.auto ? { 'data-auto': 'true' } : {}),
+      },
+    };
+  },
+
   parseHTML() {
     return [
       { tag: 'div[data-page-break="true"]' },
@@ -133,10 +143,17 @@ export const PageBreakNode = Node.create({
         contenteditable: 'false',
         'aria-label': 'ขึ้นหน้ากระดาษแผ่นใหม่',
       }),
+      ['div', { class: 'fw-page-break__fill' }],
+      [
+        'div',
+        { class: 'fw-page-break__footer', title: 'ดับเบิลคลิกเพื่อแก้ไขท้ายกระดาษ' },
+        ['span', { class: 'fw-page-break__footer-text' }],
+        ['span', { class: 'fw-page-break__footer-num' }],
+      ],
       ['div', { class: 'fw-page-break__gap' }],
       [
         'div',
-        { class: 'fw-page-break__header' },
+        { class: 'fw-page-break__header', title: 'ดับเบิลคลิกเพื่อแก้ไขหัวกระดาษ' },
         ['span', { class: 'fw-page-break__title' }],
         ['span', { class: 'fw-page-break__num' }],
       ],

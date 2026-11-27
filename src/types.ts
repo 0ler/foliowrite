@@ -8,6 +8,9 @@ export interface DocumentRecord {
   contentHtml: string;
   plainText: string;
   headerText: string;
+  footerText?: string;
+  showHeader?: boolean;
+  showFooter?: boolean;
   showPageNumbers: boolean;
   folderId: string | null;
   isPinned: boolean;

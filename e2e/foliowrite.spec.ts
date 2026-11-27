@@ -224,16 +224,36 @@ test.describe('FolioWrite Cross-Device E2E Flows (replica-test)', () => {
     // Create doc from Thai Memo quick-pill
     await page.locator('#tpl-quick-thai-memo').click();
 
-    // 2) Set custom Running Header on Sheet 1 ("บริษัท โฟลิโอ จำกัด — เอกสารภายใน")
+    // 2) Verify Header input is NOT shown on single-click, and ONLY appears on double-click!
+    const runningHeader = page.locator('#running-header');
     const headerInput = page.locator('#input-running-header');
+    await expect(runningHeader).toBeVisible();
+    await expect(headerInput).toHaveCount(0);
+    await runningHeader.click();
+    await expect(headerInput).toHaveCount(0);
+
+    // Double-click Running Header -> input appears -> type & press Enter to commit
+    await runningHeader.dblclick();
     await expect(headerInput).toBeVisible();
     await headerInput.fill('บริษัท โฟลิโอ จำกัด — เอกสารภายใน');
+    await headerInput.press('Enter');
+    await expect(headerInput).toHaveCount(0);
+    await expect(runningHeader).toContainText('บริษัท โฟลิโอ จำกัด — เอกสารภายใน');
 
-    // 3) Insert a Page Break ("ขึ้นหน้าใหม่") and verify Page 2 displays the physical page gap + repeating header!
+    // Double-click Running Footer -> input appears -> type & press Enter
+    const runningFooter = page.locator('#running-footer');
+    await runningFooter.scrollIntoViewIfNeeded();
+    await runningFooter.dblclick();
+    const footerInput = page.locator('#input-running-footer');
+    await expect(footerInput).toBeVisible();
+    await footerInput.fill('ฝ่ายบริหารงานทั่วไป • ห้ามเผยแพร่');
+    await footerInput.press('Enter');
+    await expect(footerInput).toHaveCount(0);
+
+    // 3) Click dedicated "สร้างหน้าใหม่" menu button (#btn-new-page) and verify Page 2 gap + repeating header & footer!
     await page.locator('.tiptap').click();
-    await page.keyboard.press('End');
-    await page.locator('#ribbon-tab-insert').click();
-    await page.locator('#btn-insert-pagebreak').click();
+    await page.keyboard.press('Control+End');
+    await page.locator('#btn-new-page').click();
     await page.keyboard.type('เนื้อหาในแผ่นที่ 2 ต่อเนื่องจากแผ่นแรก พร้อมหัวกระดาษซ้ำอัตโนมัติ');
 
     const pageBreakEl = page.locator('.fw-page-break').first();
@@ -244,10 +264,24 @@ test.describe('FolioWrite Cross-Device E2E Flows (replica-test)', () => {
       .evaluate((el) => getComputedStyle(el, '::before').getPropertyValue('content'));
     expect(titleBefore).toContain('บริษัท โฟลิโอ จำกัด');
 
+    const footerBefore = await page
+      .locator('.fw-page-break__footer-text')
+      .first()
+      .evaluate((el) => getComputedStyle(el, '::before').getPropertyValue('content'));
+    expect(footerBefore).toContain('ฝ่ายบริหารงานทั่วไป');
+
     await pageBreakEl.scrollIntoViewIfNeeded();
     await page.screenshot({ path: path.join(screenshotDir, 'S02-new-page-header.png') });
 
-    // 4) Insert an image via "+ รูปภาพ" and verify Image Inspector Pill
+    // 4) Open Header & Footer Settings from Layout menu (#btn-header-footer-settings) and adjust settings
+    await page.locator('#ribbon-tab-layout').click();
+    await page.locator('#btn-header-footer-settings').click();
+    await expect(page.getByRole('dialog')).toContainText('ตั้งค่าหัวกระดาษและท้ายกระดาษ');
+    await page.locator('#input-modal-header').fill('บริษัท โฟลิโอ จำกัด (แก้ไขจากเมนู)');
+    await page.locator('#btn-close-hf-modal').click();
+    await expect(runningHeader).toContainText('บริษัท โฟลิโอ จำกัด (แก้ไขจากเมนู)');
+
+    // 5) Insert an image via "+ รูปภาพ" and verify Image Inspector Pill
     await page.locator('#btn-quick-image').click();
     const iconSvgPath = path.resolve('public/foliowrite-icon.svg');
     await page.locator('#input-editor-image').setInputFiles(iconSvgPath);
@@ -260,5 +294,43 @@ test.describe('FolioWrite Cross-Device E2E Flows (replica-test)', () => {
     await page.locator('#btn-img-align-center').click();
 
     await page.screenshot({ path: path.join(screenshotDir, 'S02-floating-dock-image.png') });
+  });
+
+  test('Typing beyond Page 1 automatically creates a new page with repeating header & footer', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await page.locator('#tpl-blank').click();
+
+    // Set header via Layout > Header/Footer settings menu
+    await page.locator('#ribbon-tab-layout').click();
+    await page.locator('#btn-header-footer-settings').click();
+    await page.locator('#btn-hf-preset-official').click();
+    await page.locator('#input-modal-header').fill('เอกสารทดสอบขึ้นหน้าใหม่อัตโนมัติ');
+    await page.locator('#btn-close-hf-modal').click();
+
+    // Initially 0 page breaks on a blank document
+    await expect(page.locator('.fw-page-break')).toHaveCount(0);
+
+    // Type paragraphs until content exceeds Page 1 height -> auto-pagination must create Page 2!
+    await page.locator('.tiptap').click();
+    for (let i = 1; i <= 34; i += 1) {
+      await page.keyboard.insertText(`บรรทัดทดสอบที่ ${i} สำหรับตรวจสอบการสร้างหน้ากระดาษแผ่นใหม่อัตโนมัติเมื่อพิมพ์เกินหน้าแรก`);
+      await page.keyboard.press('Enter');
+    }
+    await page.keyboard.insertText('ข้อความนี้อยู่บนหน้าที่ 2 ซึ่งถูกสร้างขึ้นอัตโนมัติทันทีที่พิมพ์เกินหน้าแรก');
+
+    const autoBreak = page.locator('.fw-page-break[data-auto="true"]').first();
+    await expect(autoBreak).toBeVisible();
+
+    const repeatedHeader = await autoBreak
+      .locator('.fw-page-break__title')
+      .evaluate((el) => getComputedStyle(el, '::before').getPropertyValue('content'));
+    expect(repeatedHeader).toContain('เอกสารทดสอบขึ้นหน้าใหม่อัตโนมัติ');
+
+    const repeatedFooter = await autoBreak
+      .locator('.fw-page-break__footer-text')
+      .evaluate((el) => getComputedStyle(el, '::before').getPropertyValue('content'));
+    expect(repeatedFooter).toContain('เอกสารภายใน');
   });
 });

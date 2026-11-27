@@ -885,6 +885,24 @@ textarea {
   box-shadow: 0 3px 10px rgba(21, 103, 90, 0.25);
 }
 
+.fw-capsule-new-page {
+  background: #ffffff;
+  border-color: var(--color-border);
+  color: var(--color-text);
+}
+
+.fw-capsule-new-page:hover:not(:disabled) {
+  background: var(--color-accent-soft);
+  border-color: rgba(21, 103, 90, 0.28);
+  color: var(--color-accent);
+  box-shadow: none;
+}
+
+.fw-capsule-new-page:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .fw-capsule-divider {
   width: 1px;
   height: 22px;
@@ -1076,22 +1094,20 @@ textarea {
    =========================================================== */
 .fw-sheet {
   --sheet-pad-x: 92px;
+  --page-pad-top: 28px;
+  --page-pad-bottom: 84px;
+  --page-gap: 28px;
   --doc-header-label: '';
+  --doc-footer-label: '';
   background: #ffffff;
   color: #181d27;
   box-shadow: var(--shadow-page);
   border: 1px solid #dfe3e8;
   border-radius: 6px;
   position: relative;
+  box-sizing: border-box;
   counter-reset: fwpage 1;
   transition: box-shadow var(--motion-base) var(--ease-out);
-  background-image: repeating-linear-gradient(
-    to bottom,
-    transparent 0,
-    transparent 1121px,
-    rgba(21, 103, 90, 0.14) 1121px,
-    rgba(21, 103, 90, 0.14) 1123px
-  );
 }
 
 .fw-sheet--dragover {
@@ -1108,25 +1124,11 @@ textarea {
 .fw-sheet--a4-landscape {
   width: 1123px;
   min-height: 794px;
-  background-image: repeating-linear-gradient(
-    to bottom,
-    transparent 0,
-    transparent 792px,
-    rgba(21, 103, 90, 0.14) 792px,
-    rgba(21, 103, 90, 0.14) 794px
-  );
 }
 
 .fw-sheet--letter-portrait {
   width: 816px;
   min-height: 1056px;
-  background-image: repeating-linear-gradient(
-    to bottom,
-    transparent 0,
-    transparent 1054px,
-    rgba(21, 103, 90, 0.14) 1054px,
-    rgba(21, 103, 90, 0.14) 1056px
-  );
 }
 
 .fw-sheet--letter-landscape {
@@ -1136,61 +1138,117 @@ textarea {
 
 .fw-sheet--margin-normal {
   --sheet-pad-x: 92px;
+  --page-pad-top: 28px;
+  --page-pad-bottom: 84px;
   padding: 28px 92px 84px;
 }
 
 .fw-sheet--margin-narrow {
   --sheet-pad-x: 52px;
+  --page-pad-top: 22px;
+  --page-pad-bottom: 52px;
   padding: 22px 52px 52px;
 }
 
 .fw-sheet--margin-wide {
   --sheet-pad-x: 136px;
+  --page-pad-top: 32px;
+  --page-pad-bottom: 92px;
   padding: 32px 136px 92px;
 }
 
-/* Editable Running Header Zone at Top of Sheet 1 (and mirrored on every Page Break!) */
+/* Running Header on Sheet 1 — plain text; double-click to edit (mirrored on every new page) */
 .fw-running-header {
+  box-sizing: border-box;
+  height: 34px;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
   gap: 12px;
-  padding-bottom: 10px;
-  margin-bottom: 28px;
+  padding-bottom: 8px;
+  margin-bottom: 22px;
   border-bottom: 1px solid #eaecf0;
   font-size: 10pt;
   color: var(--color-text-muted);
   user-select: none;
+  cursor: default;
+  border-radius: 4px 4px 0 0;
+  transition: background var(--motion-fast) var(--ease-out);
+}
+
+.fw-running-header:hover,
+.fw-running-footer:hover {
+  background: rgba(21, 103, 90, 0.045);
+}
+
+.fw-sheet[data-show-header='false'] .fw-running-header {
+  border-bottom-color: transparent;
+}
+
+.fw-running-header__text,
+.fw-running-footer__text {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fw-running-header__hint {
+  opacity: 0;
+  font-style: italic;
+  transition: opacity var(--motion-fast) var(--ease-out);
+}
+
+.fw-running-header:hover .fw-running-header__hint,
+.fw-running-footer:hover .fw-running-header__hint {
+  opacity: 0.7;
 }
 
 .fw-running-header__input {
   flex: 1;
-  border: 1px solid transparent;
+  border: 1px solid var(--color-accent);
   border-radius: 6px;
   padding: 3px 6px;
   margin-left: -6px;
   font-size: 10pt;
-  color: var(--color-text-muted);
-  background: transparent;
-  transition: border-color var(--motion-fast) var(--ease-out), background var(--motion-fast) var(--ease-out);
-}
-
-.fw-running-header__input:hover {
-  background: var(--color-surface-subtle);
-  border-color: var(--color-border);
-}
-
-.fw-running-header__input:focus {
-  background: #ffffff;
   color: var(--color-text);
-  border-color: var(--color-accent);
+  background: #ffffff;
   outline: none;
+  box-shadow: 0 0 0 3px rgba(21, 103, 90, 0.12);
 }
 
 .fw-running-header__pagenum {
   font-size: 9.5pt;
   color: var(--color-text-muted);
   white-space: nowrap;
+}
+
+/* Running Footer = footer of the LAST page (earlier pages draw theirs inside each page break) */
+.fw-running-footer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--page-pad-bottom);
+  box-sizing: border-box;
+  padding: 0 var(--sheet-pad-x);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 9.5pt;
+  color: var(--color-text-muted);
+  user-select: none;
+}
+
+.fw-running-footer__pagenum::before {
+  content: var(--doc-pagenum-prefix, 'หน้า ') counter(fwpage);
+}
+
+.fw-sheet[data-show-pagenum='false'] .fw-running-footer__pagenum,
+.fw-sheet[data-show-footer='false'] .fw-running-footer__pagenum {
+  display: none;
 }
 
 /* Mobile Text-Only Reflow Option (secondary toggle if user wants big font reflow) */
@@ -1348,40 +1406,78 @@ textarea {
 }
 
 /* =====================================================================
-   TRUE VISUAL NEW-PAGE GAP + REPEATING RUNNING HEADER IDENTICAL TO PAGE 1
+   REAL PAGE SEAM: fill → footer of page N → gap → header of page N+1
+   (fill height is computed live so every page is exactly one sheet tall)
    ===================================================================== */
+.fw-prose .tiptap > :first-child,
+.fw-prose .tiptap .fw-page-break + * {
+  margin-top: 0 !important;
+}
+
 .fw-prose .tiptap .fw-page-break {
-  counter-increment: fwpage;
   border: none;
   display: block;
-  margin: 52px calc(-1 * var(--sheet-pad-x)) 28px;
-  padding: 0;
+  margin: 0 calc(-1 * var(--sheet-pad-x));
+  padding: 0 0 22px;
   background: transparent;
   user-select: none;
-  cursor: pointer;
+  cursor: default;
+}
+
+.fw-prose .tiptap .fw-page-break__fill {
+  height: 0;
+}
+
+.fw-prose .tiptap .fw-page-break__footer {
+  box-sizing: border-box;
+  height: var(--page-pad-bottom);
+  padding: 0 var(--sheet-pad-x);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 9.5pt;
+  color: var(--color-text-muted);
+  background: #ffffff;
+}
+
+.fw-prose .tiptap .fw-page-break__footer-text::before {
+  content: var(--doc-footer-label);
+}
+
+.fw-prose .tiptap .fw-page-break__footer-num::before {
+  content: var(--doc-pagenum-prefix, 'หน้า ') counter(fwpage);
 }
 
 .fw-prose .tiptap .fw-page-break__gap {
-  height: 28px;
-  background: var(--color-canvas);
+  height: var(--page-gap);
+  background: var(--color-canvas, #f2f4f7);
   border-top: 1px solid #dfe3e8;
   border-bottom: 1px solid #dfe3e8;
   box-shadow:
-    inset 0 4px 8px rgba(16, 24, 40, 0.04),
-    inset 0 -4px 8px rgba(16, 24, 40, 0.04);
+    inset 0 4px 8px rgba(16, 24, 40, 0.05),
+    inset 0 -4px 8px rgba(16, 24, 40, 0.05);
 }
 
 .fw-prose .tiptap .fw-page-break__header {
+  counter-increment: fwpage;
+  box-sizing: border-box;
+  height: calc(var(--page-pad-top) + 34px);
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
   gap: 12px;
   background: #ffffff;
   color: var(--color-text-muted);
   font-size: 10pt;
-  padding: 26px 0 10px;
+  padding: 0 0 8px;
   margin: 0 var(--sheet-pad-x);
   border-bottom: 1px solid #eaecf0;
+}
+
+.fw-prose .tiptap .fw-page-break__footer:hover,
+.fw-prose .tiptap .fw-page-break__header:hover {
+  background: rgba(21, 103, 90, 0.045);
 }
 
 .fw-prose .tiptap .fw-page-break__title::before {
@@ -1389,12 +1485,18 @@ textarea {
 }
 
 .fw-prose .tiptap .fw-page-break__num {
-  font-size: 9.5pt;
-  white-space: nowrap;
+  display: none;
 }
 
-.fw-prose .tiptap .fw-page-break__num::before {
-  content: var(--doc-pagenum-prefix, 'หน้า ') counter(fwpage);
+.fw-sheet[data-show-header='false'] .tiptap .fw-page-break__header {
+  border-bottom-color: transparent;
+}
+
+.fw-sheet[data-show-header='false'] .tiptap .fw-page-break__title,
+.fw-sheet[data-show-footer='false'] .tiptap .fw-page-break__footer-text,
+.fw-sheet[data-show-footer='false'] .tiptap .fw-page-break__footer-num,
+.fw-sheet[data-show-pagenum='false'] .tiptap .fw-page-break__footer-num {
+  visibility: hidden;
 }
 
 .fw-prose .tiptap .fw-page-break.ProseMirror-selectednode .fw-page-break__gap {
@@ -1402,8 +1504,26 @@ textarea {
   border-bottom-color: var(--color-accent);
 }
 
-/* Print-only running header element (hidden on screen, fixed on every printed page) */
-.fw-print-running-header {
+/* Fit-to-screen reflow mode: no physical pages, just a slim divider */
+.fw-sheet--reflow .tiptap .fw-page-break__fill,
+.fw-sheet--reflow .tiptap .fw-page-break__footer,
+.fw-sheet--reflow .tiptap .fw-page-break__header {
+  display: none;
+}
+
+.fw-sheet--reflow .tiptap .fw-page-break[data-auto='true'] {
+  display: none;
+}
+
+.fw-sheet--reflow .fw-running-footer {
+  position: static;
+  height: auto;
+  padding: 16px 0 0;
+}
+
+/* Print-only running header/footer elements (hidden on screen, fixed on every printed page) */
+.fw-print-running-header,
+.fw-print-running-footer {
   display: none;
 }
 
@@ -1744,8 +1864,23 @@ textarea {
   .fw-mobile-bar-wrap,
   .fw-modal-backdrop,
   .fw-toast-stack,
-  .fw-running-header {
+  .fw-running-header,
+  .fw-running-footer {
     display: none !important;
+  }
+
+  /* Fixed Running Footer repeats on every printed/PDF page */
+  .fw-print-running-footer {
+    display: flex !important;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    justify-content: space-between;
+    padding-top: 6px;
+    font-size: 9pt;
+    color: #535862;
+    background: #ffffff;
   }
 
   /* Fixed Running Header repeats on EVERY printed/PDF page automatically! */
@@ -1790,6 +1925,13 @@ textarea {
     page-break-after: always;
   }
 
+  /* Auto (overflow) breaks vanish in print: the printer paginates natively */
+  .fw-prose .tiptap .fw-page-break[data-auto='true'] {
+    display: none !important;
+  }
+
+  .fw-prose .tiptap .fw-page-break__fill,
+  .fw-prose .tiptap .fw-page-break__footer,
   .fw-prose .tiptap .fw-page-break__gap,
   .fw-prose .tiptap .fw-page-break__header {
     display: none !important;

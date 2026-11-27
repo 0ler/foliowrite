@@ -438,7 +438,9 @@ async function convertBlockNodes(
     }
 
     if (el.getAttribute('data-page-break') === 'true') {
-      out.push(new Paragraph({ pageBreakBefore: true, children: [] }));
+      if (el.getAttribute('data-auto') !== 'true') {
+        out.push(new Paragraph({ pageBreakBefore: true, children: [] }));
+      }
       continue;
     }
 
@@ -545,8 +547,11 @@ export async function exportDocumentAsDocx(doc: DocumentRecord): Promise<void> {
   const baseWidth = doc.pageSize === 'Letter' ? 12240 : 11906;
   const baseHeight = doc.pageSize === 'Letter' ? 15840 : 16838;
 
-  const effectiveHeader = (doc.headerText ?? doc.title ?? '').trim();
-  const includePageNum = doc.showPageNumbers !== false;
+  const effectiveHeader =
+    doc.showHeader === false ? '' : (doc.headerText ?? doc.title ?? '').trim();
+  const showFooterZone = doc.showFooter !== false;
+  const effectiveFooter = showFooterZone ? (doc.footerText ?? '').trim() : '';
+  const includePageNum = showFooterZone && doc.showPageNumbers !== false;
   const fontName = doc.defaultFont || 'Sarabun';
 
   const headerRuns: TextRun[] = [];
@@ -560,18 +565,18 @@ export async function exportDocumentAsDocx(doc: DocumentRecord): Promise<void> {
       }),
     );
   }
+
+  const footerRuns: TextRun[] = [];
+  if (effectiveFooter) {
+    footerRuns.push(new TextRun({ text: effectiveFooter, font: fontName, size: 18, color: '717680' }));
+  }
   if (includePageNum) {
-    if (effectiveHeader) {
-      headerRuns.push(new TextRun({ text: '   •   หน้า ', font: fontName, size: 19, color: '535862' }));
-    } else {
-      headerRuns.push(new TextRun({ text: 'หน้า ', font: fontName, size: 19, color: '535862' }));
-    }
-    headerRuns.push(
+    footerRuns.push(
       new TextRun({
-        children: [PageNumber.CURRENT, ' / ', PageNumber.TOTAL_PAGES],
+        children: [effectiveFooter ? '   •   หน้า ' : 'หน้า ', PageNumber.CURRENT, ' จาก ', PageNumber.TOTAL_PAGES],
         font: fontName,
-        size: 19,
-        color: '535862',
+        size: 18,
+        color: '717680',
       }),
     );
   }
@@ -616,25 +621,19 @@ export async function exportDocumentAsDocx(doc: DocumentRecord): Promise<void> {
                 }),
               }
             : undefined,
-        footers: includePageNum
-          ? {
-              default: new Footer({
-                children: [
-                  new Paragraph({
-                    alignment: AlignmentType.CENTER,
-                    children: [
-                      new TextRun({
-                        children: ['หน้า ', PageNumber.CURRENT, ' จาก ', PageNumber.TOTAL_PAGES],
-                        font: fontName,
-                        size: 18,
-                        color: '717680',
-                      }),
-                    ],
-                  }),
-                ],
-              }),
-            }
-          : undefined,
+        footers:
+          footerRuns.length > 0
+            ? {
+                default: new Footer({
+                  children: [
+                    new Paragraph({
+                      alignment: AlignmentType.CENTER,
+                      children: footerRuns,
+                    }),
+                  ],
+                }),
+              }
+            : undefined,
         children: children.length > 0 ? children : [new Paragraph({ children: [] })],
       },
     ],
