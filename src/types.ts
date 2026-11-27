@@ -7,6 +7,8 @@ export interface DocumentRecord {
   title: string;
   contentHtml: string;
   plainText: string;
+  headerText: string;
+  showPageNumbers: boolean;
   folderId: string | null;
   isPinned: boolean;
   isTrashed: boolean;
@@ -46,6 +48,7 @@ export interface DocumentTemplate {
   orientation: PageOrientation;
   margins: PageMargin;
   defaultFont: string;
+  headerText?: string;
   contentHtml: string;
 }
 

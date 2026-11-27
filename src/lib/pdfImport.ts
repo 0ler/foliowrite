@@ -9,6 +9,7 @@ export interface PdfImportResult {
   pageSize: PageSize;
   orientation: PageOrientation;
   pageCount: number;
+  extractedImageCount: number;
   usedImageFallbackPages: number;
 }
 
@@ -32,6 +33,16 @@ interface VisualLine {
   runs: PositionedGlyphRun[];
 }
 
+interface ExtractedPdfImage {
+  dataUrl: string;
+  x: number;
+  yTop: number;
+  yBottom: number;
+  widthPt: number;
+  heightPt: number;
+  align: 'left' | 'center' | 'right';
+}
+
 interface ColumnSegment {
   minX: number;
   maxX: number;
@@ -40,46 +51,38 @@ interface ColumnSegment {
 }
 
 const THAI_PUA_MAP: Record<number, string> = {
-  // Common WinAnsi / MacThai / PDF subset PUA mappings -> standard Unicode Thai
-  0xf700: '\u0e10', // ฐ
-  0xf701: '\u0e34', // ิ
-  0xf702: '\u0e35', // ี
-  0xf703: '\u0e36', // ึ
-  0xf704: '\u0e37', // ื
-  0xf705: '\u0e48', // ่
-  0xf706: '\u0e49', // ้
-  0xf707: '\u0e4a', // ๊
-  0xf708: '\u0e4b', // ๋
-  0xf709: '\u0e4c', // ์
-  0xf70a: '\u0e48', // ่
-  0xf70b: '\u0e49', // ้
-  0xf70c: '\u0e4a', // ๊
-  0xf70d: '\u0e4b', // ๋
-  0xf70e: '\u0e4c', // ์
-  0xf70f: '\u0e0d', // ญ
-  0xf710: '\u0e31', // ั
-  0xf711: '\u0e4d', // ํ
-  0xf712: '\u0e47', // ็
-  0xf713: '\u0e48', // ่
-  0xf714: '\u0e49', // ้
-  0xf715: '\u0e4a', // ๊
-  0xf716: '\u0e4b', // ๋
-  0xf717: '\u0e4c', // ์
-  0xf718: '\u0e38', // ุ
-  0xf719: '\u0e39', // ู
-  0xf71a: '\u0e3a', // ฺ
+  0xf700: '\u0e10',
+  0xf701: '\u0e34',
+  0xf702: '\u0e35',
+  0xf703: '\u0e36',
+  0xf704: '\u0e37',
+  0xf705: '\u0e48',
+  0xf706: '\u0e49',
+  0xf707: '\u0e4a',
+  0xf708: '\u0e4b',
+  0xf709: '\u0e4c',
+  0xf70a: '\u0e48',
+  0xf70b: '\u0e49',
+  0xf70c: '\u0e4a',
+  0xf70d: '\u0e4b',
+  0xf70e: '\u0e4c',
+  0xf70f: '\u0e0d',
+  0xf710: '\u0e31',
+  0xf711: '\u0e4d',
+  0xf712: '\u0e47',
+  0xf713: '\u0e48',
+  0xf714: '\u0e49',
+  0xf715: '\u0e4a',
+  0xf716: '\u0e4b',
+  0xf717: '\u0e4c',
+  0xf718: '\u0e38',
+  0xf719: '\u0e39',
+  0xf71a: '\u0e3a',
 };
 
-/**
- * Repairs Thai text extracted from PDF font subsets where:
- * 1) Positioned OpenType tone/taikhu glyphs have missing ToUnicode entries (\u0000)
- * 2) Wide leading vowels (แ, เ, โ, ไ, ใ) trigger synthetic kerning spaces ("แ ละ" -> "และ")
- * 3) Decomposed Sara Am (\u0e4d\u0e32) needs canonical composition (\u0e33)
- */
 export function repairThaiPdfString(raw: string): string {
   if (!raw) return '';
 
-  // Step 1: Map PUA characters while keeping \u0000 temporarily so we can infer exact missing mark
   let s = '';
   for (let i = 0; i < raw.length; i += 1) {
     const code = raw.charCodeAt(i);
@@ -90,28 +93,18 @@ export function repairThaiPdfString(raw: string): string {
     }
   }
 
-  // Step 2: Infer missing OpenType Thai glyph variants that PDF subsets emit as \u0000:
-  // - (เ|แ) + consonant + \u0000 -> ็ (Mai Taikhu, e.g. เป็น, เห็น, เต็ม, แข็ง)
   s = s.replace(/([\u0e40\u0e41][\u0e01-\u0e2e])\u0000/g, '$1\u0e47');
-  // - (นี|นี|ขึ|ตั|ทั|นั|ยั|ชั|ดั|มั) + \u0000 -> ้ (Mai Tho on upper vowel: นี้, ขึ้น, ตั้ง, ทั้ง, นั้น)
   s = s.replace(/(นี|ขึ|ตั|ทั|นั|ยั|ชั|ขั|สั|มั|รั|ลั)\u0000/g, '$1\u0e49');
-  // - Remaining upper vowel (\u0e31, \u0e34-\u0e37) + \u0000 -> ่ (Mai Ek shifted up: ที่, พื่อ, เรื่อง, พึ่ง, ชื่อ)
   s = s.replace(/([\u0e31\u0e34-\u0e37])\u0000/g, '$1\u0e48');
-  // - Tall consonant (ป, ฝ, ฟ, ฬ) + \u0000 -> ่ (Mai Ek shifted left: ฝ่าย, ป่า)
   s = s.replace(/([\u0e1b\u0e1d\u0e1f\u0e2c])\u0000/g, '$1\u0e48');
-  // - Any remaining \u0000 after a Thai consonant -> ่
   s = s.replace(/([\u0e01-\u0e2e])\u0000/g, '$1\u0e48');
-  // Strip any leftover stray \u0000
   s = s.replace(/\u0000/g, '');
 
-  // Step 3: Normalize compatibility ligatures & fix decomposed Sara Am (ํ + า -> ำ)
   s = s
     .normalize('NFKC')
     .replace(/\u0e4d\u0e32/g, '\u0e33')
     .replace(/([\u0e48-\u0e4b])\u0e4d\u0e32/g, '$1\u0e33');
 
-  // Step 4: Remove spurious kerning space right after Thai leading vowels (เ แ โ ใ ไ) before Thai consonants
-  // In Thai orthography, leading vowels NEVER end a word before a space!
   s = s.replace(/([\u0e40-\u0e44])\s+([\u0e01-\u0e2e])/g, '$1$2');
 
   return s;
@@ -132,7 +125,6 @@ function isThaiCombiningChar(ch: string): boolean {
 }
 
 function joinRunsIntoRichHtml(runs: PositionedGlyphRun[], bodyFontSize: number): string {
-  // Filter out empty runs & synthetic whitespace-only spacer runs (whose width is often overstated in PDFs)
   const meaningful = runs
     .filter((r) => r.str.trim().length > 0)
     .sort((a, b) => a.x - b.x);
@@ -236,7 +228,6 @@ function splitLineIntoColumns(line: VisualLine): ColumnSegment[] {
     const prev = meaningful[i - 1];
     const cur = meaningful[i];
     const gap = cur.x - (prev.x + Math.max(prev.width, 0));
-    // Distinct column gap threshold (> 1.25x font size, min 15pt — normal word space is ~3-5pt)
     const threshold = Math.max(15, line.avgFontSize * 1.25);
     if (gap > threshold) {
       groups.push([cur]);
@@ -293,6 +284,166 @@ function median(values: number[]): number {
   return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
+type Matrix2D = [number, number, number, number, number, number];
+
+function multiplyMatrices(m1: Matrix2D, m2: Matrix2D): Matrix2D {
+  return [
+    m1[0] * m2[0] + m1[2] * m2[1],
+    m1[1] * m2[0] + m1[3] * m2[1],
+    m1[0] * m2[2] + m1[2] * m2[3],
+    m1[1] * m2[2] + m1[3] * m2[3],
+    m1[0] * m2[4] + m1[2] * m2[5] + m1[4],
+    m1[1] * m2[4] + m1[3] * m2[5] + m1[5],
+  ];
+}
+
+function transformPoint(m: Matrix2D, x: number, y: number): [number, number] {
+  return [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
+}
+
+/**
+ * Extracts embedded images from a PDF page by rendering the page once at high resolution,
+ * reading the operator list bounding boxes (paintImageXObject / paintInlineImageXObject),
+ * and cropping each non-background image region cleanly into a standalone PNG Data URL!
+ */
+async function extractEmbeddedImagesFromPage(
+  page: pdfjsLib.PDFPageProxy,
+  pageWidthPt: number,
+  pageHeightPt: number,
+): Promise<ExtractedPdfImage[]> {
+  try {
+    const opList = await page.getOperatorList();
+    const OPS = pdfjsLib.OPS;
+
+    const candidateBoxes: Array<{
+      minX: number;
+      maxX: number;
+      minY: number;
+      maxY: number;
+    }> = [];
+
+    const matrixStack: Matrix2D[] = [];
+    let ctm: Matrix2D = [1, 0, 0, 1, 0, 0];
+
+    for (let i = 0; i < opList.fnArray.length; i += 1) {
+      const fn = opList.fnArray[i];
+      const args = opList.argsArray[i];
+
+      if (fn === OPS.save) {
+        matrixStack.push([...ctm] as Matrix2D);
+      } else if (fn === OPS.restore) {
+        ctm = matrixStack.pop() || [1, 0, 0, 1, 0, 0];
+      } else if (fn === OPS.transform && Array.isArray(args) && args.length >= 6) {
+        const nextM: Matrix2D = [
+          Number(args[0]),
+          Number(args[1]),
+          Number(args[2]),
+          Number(args[3]),
+          Number(args[4]),
+          Number(args[5]),
+        ];
+        ctm = multiplyMatrices(ctm, nextM);
+      } else if (
+        fn === OPS.paintImageXObject ||
+        fn === OPS.paintInlineImageXObject ||
+        fn === OPS.paintImageXObjectRepeat
+      ) {
+        // PDF images are painted onto the [0,1]x[0,1] unit square transformed by CTM
+        const corners = [
+          transformPoint(ctm, 0, 0),
+          transformPoint(ctm, 1, 0),
+          transformPoint(ctm, 0, 1),
+          transformPoint(ctm, 1, 1),
+        ];
+        const xs = corners.map((p) => p[0]);
+        const ys = corners.map((p) => p[1]);
+        const minX = Math.max(0, Math.min(...xs));
+        const maxX = Math.min(pageWidthPt, Math.max(...xs));
+        const minY = Math.max(0, Math.min(...ys));
+        const maxY = Math.min(pageHeightPt, Math.max(...ys));
+        const wPt = maxX - minX;
+        const hPt = maxY - minY;
+
+        // Ignore tiny decorative 1px/line artifacts (< 16pt) and full-page solid white backgrounds (> 96% of page)
+        const isTinyArtifact = wPt < 16 || hPt < 16;
+        const isFullPageBg = wPt > pageWidthPt * 0.96 && hPt > pageHeightPt * 0.96;
+
+        if (!isTinyArtifact && !isFullPageBg) {
+          // Deduplicate overlapping identical boxes
+          const duplicate = candidateBoxes.some(
+            (b) =>
+              Math.abs(b.minX - minX) < 4 &&
+              Math.abs(b.maxX - maxX) < 4 &&
+              Math.abs(b.minY - minY) < 4 &&
+              Math.abs(b.maxY - maxY) < 4,
+          );
+          if (!duplicate) {
+            candidateBoxes.push({ minX, maxX, minY, maxY });
+          }
+        }
+      }
+    }
+
+    if (candidateBoxes.length === 0) {
+      return [];
+    }
+
+    // Render page at 2x resolution onto an offscreen canvas so we can crop crisp images
+    const scale = 2.0;
+    const viewport = page.getViewport({ scale });
+    const fullCanvas = document.createElement('canvas');
+    fullCanvas.width = Math.ceil(viewport.width);
+    fullCanvas.height = Math.ceil(viewport.height);
+    const ctx = fullCanvas.getContext('2d');
+    if (!ctx) return [];
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, fullCanvas.width, fullCanvas.height);
+    await page.render({ canvasContext: ctx, viewport, canvas: fullCanvas }).promise;
+
+    const extracted: ExtractedPdfImage[] = [];
+    for (const box of candidateBoxes) {
+      const [vx1, vy1] = viewport.convertToViewportPoint(box.minX, box.maxY);
+      const [vx2, vy2] = viewport.convertToViewportPoint(box.maxX, box.minY);
+      const sx = Math.max(0, Math.floor(Math.min(vx1, vx2)));
+      const sy = Math.max(0, Math.floor(Math.min(vy1, vy2)));
+      const sw = Math.min(fullCanvas.width - sx, Math.ceil(Math.abs(vx2 - vx1)));
+      const sh = Math.min(fullCanvas.height - sy, Math.ceil(Math.abs(vy2 - vy1)));
+      if (sw < 16 || sh < 16) continue;
+
+      const cropCanvas = document.createElement('canvas');
+      cropCanvas.width = sw;
+      cropCanvas.height = sh;
+      const cropCtx = cropCanvas.getContext('2d');
+      if (!cropCtx) continue;
+      cropCtx.drawImage(fullCanvas, sx, sy, sw, sh, 0, 0, sw, sh);
+
+      const boxCenter = (box.minX + box.maxX) / 2;
+      const pageCenter = pageWidthPt / 2;
+      const align: 'left' | 'center' | 'right' =
+        Math.abs(boxCenter - pageCenter) <= pageWidthPt * 0.12
+          ? 'center'
+          : boxCenter > pageCenter
+            ? 'right'
+            : 'left';
+
+      extracted.push({
+        dataUrl: cropCanvas.toDataURL('image/png'),
+        x: box.minX,
+        yTop: box.maxY,
+        yBottom: box.minY,
+        widthPt: Math.round((box.maxX - box.minX) * 1.25), // convert PDF 72dpi pt to ~96dpi CSS px
+        heightPt: Math.round((box.maxY - box.minY) * 1.25),
+        align,
+      });
+    }
+
+    extracted.sort((a, b) => b.yTop - a.yTop);
+    return extracted;
+  } catch {
+    return [];
+  }
+}
+
 async function renderPageAsHighResPng(page: pdfjsLib.PDFPageProxy): Promise<string> {
   const viewport = page.getViewport({ scale: 1.8 });
   const canvas = document.createElement('canvas');
@@ -315,7 +466,6 @@ function assignSegmentsToBuckets(
   cols: ColumnSegment[],
   anchors: number[],
 ): PositionedGlyphRun[][][] {
-  // Each cell holds an array of lines (each line is PositionedGlyphRun[])
   const buckets: PositionedGlyphRun[][][] = Array.from({ length: anchors.length }, () => []);
   for (const seg of cols) {
     let bestCol = 0;
@@ -332,27 +482,46 @@ function assignSegmentsToBuckets(
   return buckets;
 }
 
+function renderExtractedImgHtml(img: ExtractedPdfImage, index: number): string {
+  const safeW = Math.max(80, Math.min(620, img.widthPt));
+  return `<img src="${img.dataUrl}" alt="รูปภาพจาก PDF #${index + 1}" width="${safeW}" data-align="${img.align}" data-rounded="true" />`;
+}
+
 function buildStructuredPageHtml(
   lines: VisualLine[],
+  images: ExtractedPdfImage[],
   pageWidth: number,
   bodyFontSize: number,
 ): string {
-  if (lines.length === 0) return '';
+  if (lines.length === 0 && images.length === 0) return '';
 
-  const contentLeft = Math.max(24, Math.min(...lines.map((l) => l.minX)));
-  const contentRight = Math.min(pageWidth - 24, Math.max(...lines.map((l) => l.maxX)));
+  const contentLeft =
+    lines.length > 0 ? Math.max(24, Math.min(...lines.map((l) => l.minX))) : 48;
+  const contentRight =
+    lines.length > 0 ? Math.min(pageWidth - 24, Math.max(...lines.map((l) => l.maxX))) : pageWidth - 48;
 
   const htmlBlocks: string[] = [];
   let idx = 0;
+  let imgIdx = 0;
+
+  const flushImagesAboveY = (yThreshold: number) => {
+    while (imgIdx < images.length && images[imgIdx].yBottom >= yThreshold - 8) {
+      htmlBlocks.push(renderExtractedImgHtml(images[imgIdx], imgIdx));
+      imgIdx += 1;
+    }
+  };
 
   while (idx < lines.length) {
     const line = lines[idx];
+    flushImagesAboveY(line.y);
+
     const cols = splitLineIntoColumns(line);
 
-    // 1) Detect multi-row Table (including wrapped multi-line cells inside columns!)
-    // Require >= 3 columns on header row OR (>= 2 consecutive multi-col rows with >= 3 columns somewhere)
-    if (cols.length >= 3 || (cols.length >= 2 && idx + 1 < lines.length && splitLineIntoColumns(lines[idx + 1]).length >= 3)) {
-      // Collect initial seed lines to discover column X anchors
+    // 1) Detect multi-row Table
+    if (
+      cols.length >= 3 ||
+      (cols.length >= 2 && idx + 1 < lines.length && splitLineIntoColumns(lines[idx + 1]).length >= 3)
+    ) {
       const seedRows: ColumnSegment[][] = [cols];
       let probe = idx + 1;
       while (probe < lines.length && seedRows.length < 4) {
@@ -399,9 +568,7 @@ function buildStructuredPageHtml(
           const candBuckets = assignSegmentsToBuckets(candCols, anchors);
           const hasFirstCol = candBuckets[0].length > 0;
           const isContinuationOfCurrentRow =
-            logicalRows.length >= 2 &&
-            !hasFirstCol &&
-            yGap <= bodyFontSize * 2.1;
+            logicalRows.length >= 2 && !hasFirstCol && yGap <= bodyFontSize * 2.1;
 
           if (isContinuationOfCurrentRow) {
             const currentRow = logicalRows[logicalRows.length - 1];
@@ -519,7 +686,7 @@ function buildStructuredPageHtml(
       continue;
     }
 
-    // 4) Single-line 2-part metadata (e.g. "ส่วนงาน: ...   โทร. ..." or "ที่: ...   วันที่: ...")
+    // 4) Single-line 2-part metadata
     if (cols.length >= 2) {
       const combinedCols = cols
         .map((c) => joinRunsIntoRichHtml(c.runs, bodyFontSize))
@@ -540,7 +707,14 @@ function buildStructuredPageHtml(
       const candidatePlain = joinRunsPlainText(candidate.runs);
       const candidateAlign = detectAlignment(candidate, contentLeft, contentRight);
 
+      // Do not merge across an embedded image sitting between prevLine and candidate!
+      const hasImageBetween =
+        imgIdx < images.length &&
+        images[imgIdx].yTop <= prevLine.y + 4 &&
+        images[imgIdx].yBottom >= candidate.y - 4;
+
       const isSameParagraph =
+        !hasImageBetween &&
         align === 'left' &&
         candidateAlign === 'left' &&
         candidateCols.length === 1 &&
@@ -567,6 +741,12 @@ function buildStructuredPageHtml(
     idx = cursor;
   }
 
+  // Flush any remaining images positioned below the last line of text
+  while (imgIdx < images.length) {
+    htmlBlocks.push(renderExtractedImgHtml(images[imgIdx], imgIdx));
+    imgIdx += 1;
+  }
+
   return htmlBlocks.join('\n');
 }
 
@@ -580,6 +760,7 @@ export async function extractPdfToEditableDocument(file: File): Promise<PdfImpor
 
   let detectedPageSize: PageSize = 'A4';
   let detectedOrientation: PageOrientation = 'portrait';
+  let extractedImageCount = 0;
   let usedImageFallbackPages = 0;
   const pageHtmlFragments: string[] = [];
 
@@ -593,7 +774,12 @@ export async function extractPdfToEditableDocument(file: File): Promise<PdfImpor
       detectedPageSize = Math.abs(shortSide - 612) < 10 ? 'Letter' : 'A4';
     }
 
-    const textContent = await page.getTextContent();
+    const [textContent, pageImages] = await Promise.all([
+      page.getTextContent(),
+      extractEmbeddedImagesFromPage(page, viewport.width, viewport.height),
+    ]);
+    extractedImageCount += pageImages.length;
+
     const styles = (textContent.styles || {}) as Record<
       string,
       { fontFamily?: string; ascent?: number; descent?: number }
@@ -664,17 +850,17 @@ export async function extractPdfToEditableDocument(file: File): Promise<PdfImpor
 
     lines.sort((a, b) => b.y - a.y);
 
-    if (rawRuns.length === 0) {
+    if (rawRuns.length === 0 && pageImages.length === 0) {
       const dataUrl = await renderPageAsHighResPng(page);
       if (dataUrl) {
         usedImageFallbackPages += 1;
         pageHtmlFragments.push(
-          `<p><img src="${dataUrl}" alt="หน้าที่ ${pageNum} (ภาพสแกนจาก PDF)" width="620" /></p>`,
+          `<img src="${dataUrl}" alt="หน้าที่ ${pageNum} (ภาพสแกนจาก PDF)" width="620" data-align="center" data-rounded="false" />`,
         );
       }
     } else {
-      const bodyFontSize = median(rawRuns.map((r) => r.fontSize));
-      const pageHtml = buildStructuredPageHtml(lines, viewport.width, bodyFontSize);
+      const bodyFontSize = rawRuns.length > 0 ? median(rawRuns.map((r) => r.fontSize)) : 12;
+      const pageHtml = buildStructuredPageHtml(lines, pageImages, viewport.width, bodyFontSize);
       if (pageHtml.trim()) {
         pageHtmlFragments.push(pageHtml);
       }
@@ -690,6 +876,7 @@ export async function extractPdfToEditableDocument(file: File): Promise<PdfImpor
     pageSize: detectedPageSize,
     orientation: detectedOrientation,
     pageCount: pdf.numPages,
+    extractedImageCount,
     usedImageFallbackPages,
   };
 }

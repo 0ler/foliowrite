@@ -131,10 +131,18 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
   const [margins, setMargins] = useState<PageMargin>(docRecord.margins);
   const [defaultFont, setDefaultFont] = useState<string>(docRecord.defaultFont || 'Sarabun');
   const [lineSpacing, setLineSpacing] = useState<string>(docRecord.lineSpacing || '1.5');
+  const [headerText, setHeaderText] = useState<string>(
+    docRecord.headerText ?? (docRecord.title === 'เอกสารไม่มีชื่อ' ? '' : docRecord.title),
+  );
+  const [showPageNumbers, setShowPageNumbers] = useState<boolean>(
+    docRecord.showPageNumbers ?? true,
+  );
 
-  // View state
+  // View state (mobileReflow defaults to false so phones see the FULL scaled paper sheet!)
   const [zoom, setZoom] = useState<number>(100);
-  const [mobileReflow, setMobileReflow] = useState<boolean>(() => window.innerWidth < 768);
+  const [mobileReflow, setMobileReflow] = useState<boolean>(false);
+  const [viewportWidth, setViewportWidth] = useState<number>(() => window.innerWidth);
+  const [naturalSheetHeight, setNaturalSheetHeight] = useState<number>(1123);
   const [showOutline, setShowOutline] = useState<boolean>(() => window.innerWidth >= 1200);
   const [showRuler, setShowRuler] = useState<boolean>(true);
   const [darkCanvas, setDarkCanvas] = useState<boolean>(false);
@@ -170,6 +178,7 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
   const imageInputRef = useRef<HTMLInputElement>(null);
   const importFileInputRef = useRef<HTMLInputElement>(null);
   const sheetContainerRef = useRef<HTMLDivElement>(null);
+  const sheetElementRef = useRef<HTMLDivElement>(null);
 
   const scheduleSave = useCallback(
     (patch: Partial<DocumentRecord>) => {
@@ -277,11 +286,34 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
     setMargins(docRecord.margins);
     setDefaultFont(docRecord.defaultFont || 'Sarabun');
     setLineSpacing(docRecord.lineSpacing || '1.5');
+    setHeaderText(
+      docRecord.headerText ?? (docRecord.title === 'เอกสารไม่มีชื่อ' ? '' : docRecord.title),
+    );
+    setShowPageNumbers(docRecord.showPageNumbers ?? true);
     setLiveHtml(docRecord.contentHtml);
     if (editor && editor.getHTML() !== docRecord.contentHtml) {
       editor.commands.setContent(docRecord.contentHtml || '<p></p>');
     }
   }, [docRecord.id, editor]);
+
+  // Track window width & sheet height so mobile/tablet scales the entire paper sheet cleanly into view!
+  useEffect(() => {
+    const onResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  useEffect(() => {
+    const el = sheetElementRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setNaturalSheetHeight(Math.ceil(entry.target.scrollHeight || entry.contentRect.height));
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [liveHtml, pageSize, orientation, margins, mobileReflow]);
 
   useEffect(() => {
     if (editor) {
@@ -491,10 +523,17 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
     else if (val === 'blockquote') chain.toggleBlockquote().run();
   };
 
+  const handleHeaderTextChange = (val: string) => {
+    setHeaderText(val);
+    scheduleSave({ headerText: val });
+  };
+
   const currentDocSnapshot = (): DocumentRecord => ({
     ...docRecord,
     title: title.trim() || 'เอกสารไม่มีชื่อ',
     contentHtml: editor ? editor.getHTML() : liveHtml,
+    headerText,
+    showPageNumbers,
     pageSize,
     orientation,
     margins,
@@ -502,6 +541,26 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
     lineSpacing,
     wordCount: metrics.words,
   });
+
+  const sheetPixelWidth =
+    orientation === 'landscape'
+      ? pageSize === 'Letter'
+        ? 1056
+        : 1123
+      : pageSize === 'Letter'
+        ? 816
+        : 794;
+
+  // Compute auto-fit scale so phones (e.g. 390px) see the ENTIRE paper sheet edge-to-edge cleanly!
+  const availableCanvasWidth = Math.max(280, viewportWidth - (viewportWidth < 768 ? 20 : 48));
+  const autoFitScale = Math.min(1, availableCanvasWidth / sheetPixelWidth);
+  const effectiveScale = mobileReflow ? 1 : autoFitScale * (zoom / 100);
+
+  // Escape header text for CSS custom property content string (exact match with Sheet 1 header!)
+  const escapedCssHeaderLabel = headerText.trim()
+    ? `"${headerText.trim().replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+    : '""';
+  const escapedCssPageNumPrefix = showPageNumbers ? '"หน้า "' : '""';
 
   const sheetSizeClass = `fw-sheet--${pageSize.toLowerCase()}-${orientation}`;
   const sheetMarginClass = `fw-sheet--margin-${margins}`;
@@ -561,12 +620,16 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
           <button
             id="btn-mobile-reflow-toggle"
             type="button"
-            className={`fw-tool-btn ${mobileReflow ? 'fw-tool-btn--active' : ''}`}
+            className={`fw-tool-btn ${!mobileReflow ? 'fw-tool-btn--active' : ''}`}
             onClick={() => setMobileReflow((v) => !v)}
-            title="สลับมุมมองพอดีจอมือถือ / หน้ากระดาษจริง"
+            title={
+              mobileReflow
+                ? 'กำลังใช้โหมดขยายตัวหนังสือ — แตะเพื่อดูเต็มแผ่นกระดาษ'
+                : 'กำลังดูเต็มแผ่นกระดาษ — แตะเพื่อสลับโหมดขยายตัวหนังสือ'
+            }
           >
             <Smartphone size={15} />
-            <span className="fw-desktop-only">{mobileReflow ? 'พอดีจอ' : 'หน้ากระดาษ'}</span>
+            <span>{mobileReflow ? 'โหมดอ่าน' : 'เต็มแผ่น'}</span>
           </button>
 
           <button
@@ -1251,6 +1314,33 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
                         <option value="2">บรรทัด 2.0</option>
                       </select>
                     </div>
+
+                    <div className="fw-tool-group">
+                      <span style={{ fontSize: 12, color: 'var(--color-text-muted)', padding: '0 6px' }}>
+                        หัวกระดาษซ้ำทุกแผ่น:
+                      </span>
+                      <input
+                        id="input-layout-header"
+                        type="text"
+                        className="fw-input"
+                        style={{ height: 32, width: 190, fontSize: 12, borderRadius: 999 }}
+                        placeholder="เช่น บันทึกข้อความ / ชื่อหน่วยงาน"
+                        value={headerText}
+                        onChange={(e) => handleHeaderTextChange(e.target.value)}
+                      />
+                      <button
+                        id="btn-toggle-pagenum"
+                        type="button"
+                        className={`fw-tool-btn ${showPageNumbers ? 'fw-tool-btn--active' : ''}`}
+                        onClick={async () => {
+                          const next = !showPageNumbers;
+                          setShowPageNumbers(next);
+                          await onSavePatch({ showPageNumbers: next });
+                        }}
+                      >
+                        เลขหน้าอัตโนมัติ
+                      </button>
+                    </div>
                   </>
                 )}
 
@@ -1453,26 +1543,40 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
             </div>
           )}
 
-          {/* Paper Sheet (supports Drag & Drop + Clipboard Paste of images!) */}
+          {/* Paper Sheet (auto-scales to show FULL sheet edge-to-edge on mobile + supports Repeating Header!) */}
           <div
             className="fw-sheet-zoom-wrapper"
-            style={{
-              transform: mobileReflow ? 'none' : `scale(${zoom / 100})`,
-              width: mobileReflow ? '100%' : undefined,
-              display: 'flex',
-              justifyContent: 'center',
-            }}
+            style={
+              mobileReflow
+                ? {
+                    width: '100%',
+                    display: 'flex',
+                    justifyContent: 'center',
+                  }
+                : {
+                    width: `${Math.round(sheetPixelWidth * effectiveScale)}px`,
+                    height: `${Math.round(naturalSheetHeight * effectiveScale)}px`,
+                    position: 'relative',
+                  }
+            }
           >
             <div
+              ref={sheetElementRef}
               className={`fw-sheet fw-prose ${
                 mobileReflow ? 'fw-sheet--reflow' : `${sheetSizeClass} ${sheetMarginClass}`
               } ${isDraggingOverSheet ? 'fw-sheet--dragover' : ''}`}
-              style={{
-                fontFamily: `'${defaultFont}', 'Sarabun', 'Inter', sans-serif`,
-                lineHeight: lineSpacing,
-              }}
-              onClick={() => {
-                if (!readOnlyMode) {
+              style={
+                {
+                  fontFamily: `'${defaultFont}', 'Sarabun', 'Inter', sans-serif`,
+                  lineHeight: lineSpacing,
+                  transform: mobileReflow ? 'none' : `scale(${effectiveScale})`,
+                  transformOrigin: 'top left',
+                  '--doc-header-label': escapedCssHeaderLabel,
+                  '--doc-pagenum-prefix': escapedCssPageNumPrefix,
+                } as React.CSSProperties
+              }
+              onClick={(e) => {
+                if (!readOnlyMode && !(e.target instanceof HTMLInputElement)) {
                   editor?.commands.focus();
                 }
               }}
@@ -1511,6 +1615,33 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
                 }
               }}
             >
+              {/* Print-only fixed running header that repeats on every printed / PDF page */}
+              {(headerText.trim() || showPageNumbers) && (
+                <div className="fw-print-running-header" aria-hidden="true">
+                  <span>{headerText.trim()}</span>
+                  <span>{title}</span>
+                </div>
+              )}
+
+              {/* Editable Running Header on Sheet 1 (mirrored automatically on every Page Break!) */}
+              <div
+                className="fw-running-header"
+                onClick={(e) => e.stopPropagation()}
+                role="region"
+                aria-label="หัวกระดาษประจำทุกหน้า"
+              >
+                <input
+                  id="input-running-header"
+                  type="text"
+                  className="fw-running-header__input"
+                  value={headerText}
+                  onChange={(e) => handleHeaderTextChange(e.target.value)}
+                  placeholder="คลิกพิมพ์หัวกระดาษ (จะแสดงซ้ำอัตโนมัติเมื่อขึ้นหน้าใหม่ทุกแผ่น)..."
+                  aria-label="ข้อความหัวกระดาษ"
+                />
+                {showPageNumbers && <span className="fw-running-header__pagenum">หน้า 1</span>}
+              </div>
+
               <EditorContent editor={editor} />
             </div>
           </div>

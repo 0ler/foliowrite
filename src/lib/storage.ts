@@ -148,6 +148,8 @@ async function runSeedWorkspace(): Promise<void> {
     title: 'คู่มือเริ่มต้นใช้งาน FolioWrite (ข้ามอุปกรณ์)',
     contentHtml: welcomeHtml,
     plainText: htmlToPlainText(welcomeHtml),
+    headerText: 'FolioWrite — คู่มือการใช้งานเอกสารมาตรฐาน',
+    showPageNumbers: true,
     folderId: folderWorkId,
     isPinned: true,
     isTrashed: false,
@@ -168,6 +170,8 @@ async function runSeedWorkspace(): Promise<void> {
     title: 'รายงานการประชุมทีมประจำสัปดาห์',
     contentHtml: meetingTpl.contentHtml,
     plainText: htmlToPlainText(meetingTpl.contentHtml),
+    headerText: 'รายงานการประชุมประจำสัปดาห์',
+    showPageNumbers: true,
     folderId: folderTeamId,
     isPinned: false,
     isTrashed: false,
@@ -200,11 +204,14 @@ export async function createDocument(init: Partial<DocumentRecord> = {}): Promis
   const now = new Date().toISOString();
   const contentHtml = init.contentHtml ?? '<p></p>';
   const metrics = computeTextMetrics(contentHtml);
+  const titleVal = init.title?.trim() || 'เอกสารไม่มีชื่อ';
   const record: DocumentRecord = {
     id: init.id ?? generateId(),
-    title: init.title?.trim() || 'เอกสารไม่มีชื่อ',
+    title: titleVal,
     contentHtml,
     plainText: htmlToPlainText(contentHtml),
+    headerText: init.headerText ?? (titleVal === 'เอกสารไม่มีชื่อ' ? '' : titleVal),
+    showPageNumbers: init.showPageNumbers ?? true,
     folderId: init.folderId ?? null,
     isPinned: init.isPinned ?? false,
     isTrashed: false,
@@ -239,6 +246,8 @@ export async function updateDocument(
 
   const updated: DocumentRecord = {
     ...existing,
+    headerText: existing.headerText ?? '',
+    showPageNumbers: existing.showPageNumbers ?? true,
     ...patch,
     id: existing.id,
     contentHtml,
@@ -256,6 +265,8 @@ export async function duplicateDocument(id: string): Promise<DocumentRecord | un
   return createDocument({
     title: `${existing.title} (สำเนา)`,
     contentHtml: existing.contentHtml,
+    headerText: existing.headerText ?? '',
+    showPageNumbers: existing.showPageNumbers ?? true,
     folderId: existing.folderId,
     pageSize: existing.pageSize,
     orientation: existing.orientation,

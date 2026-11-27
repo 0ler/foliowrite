@@ -118,17 +118,28 @@ export const PageBreakNode = Node.create({
   selectable: true,
 
   parseHTML() {
-    return [{ tag: 'hr[data-page-break="true"]' }];
+    return [
+      { tag: 'div[data-page-break="true"]' },
+      { tag: 'hr[data-page-break="true"]' },
+    ];
   },
 
   renderHTML({ HTMLAttributes }) {
     return [
-      'hr',
+      'div',
       mergeAttributes(HTMLAttributes, {
         'data-page-break': 'true',
         class: 'fw-page-break',
-        'aria-label': 'ตัวแบ่งหน้ากระดาษ',
+        contenteditable: 'false',
+        'aria-label': 'ขึ้นหน้ากระดาษแผ่นใหม่',
       }),
+      ['div', { class: 'fw-page-break__gap' }],
+      [
+        'div',
+        { class: 'fw-page-break__header' },
+        ['span', { class: 'fw-page-break__title' }],
+        ['span', { class: 'fw-page-break__num' }],
+      ],
     ];
   },
 

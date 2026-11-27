@@ -39,7 +39,9 @@ export function computeTextMetrics(html: string): TextMetrics {
     }
   });
 
-  const estimatedPages = Math.max(1, Math.ceil(Math.max(words, 1) / 320));
+  const explicitPageBreaks = doc.body.querySelectorAll('hr[data-page-break="true"], .fw-page-break').length;
+  const wordBasedPages = Math.max(1, Math.ceil(Math.max(words, 1) / 320));
+  const estimatedPages = Math.max(wordBasedPages, explicitPageBreaks + 1);
   const readingMinutes = words === 0 ? 0 : Math.max(1, Math.ceil(words / 200));
 
   return {

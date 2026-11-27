@@ -3,9 +3,12 @@ import {
   AlignmentType,
   BorderStyle,
   Document as DocxDocument,
+  Footer,
+  Header,
   HeadingLevel,
   ImageRun,
   Packer,
+  PageNumber,
   PageOrientation as DocxOrientation,
   Paragraph,
   ShadingType,
@@ -434,20 +437,21 @@ async function convertBlockNodes(
       continue;
     }
 
+    if (el.getAttribute('data-page-break') === 'true') {
+      out.push(new Paragraph({ pageBreakBefore: true, children: [] }));
+      continue;
+    }
+
     if (tag === 'hr') {
-      if (el.getAttribute('data-page-break') === 'true') {
-        out.push(new Paragraph({ pageBreakBefore: true, children: [] }));
-      } else {
-        out.push(
-          new Paragraph({
-            border: {
-              bottom: { style: BorderStyle.SINGLE, size: 6, color: 'D5DBD8', space: 4 },
-            },
-            spacing: { before: 120, after: 120 },
-            children: [],
-          }),
-        );
-      }
+      out.push(
+        new Paragraph({
+          border: {
+            bottom: { style: BorderStyle.SINGLE, size: 6, color: 'E5E7EB', space: 4 },
+          },
+          spacing: { before: 120, after: 120 },
+          children: [],
+        }),
+      );
       continue;
     }
 
@@ -541,6 +545,37 @@ export async function exportDocumentAsDocx(doc: DocumentRecord): Promise<void> {
   const baseWidth = doc.pageSize === 'Letter' ? 12240 : 11906;
   const baseHeight = doc.pageSize === 'Letter' ? 15840 : 16838;
 
+  const effectiveHeader = (doc.headerText ?? doc.title ?? '').trim();
+  const includePageNum = doc.showPageNumbers !== false;
+  const fontName = doc.defaultFont || 'Sarabun';
+
+  const headerRuns: TextRun[] = [];
+  if (effectiveHeader) {
+    headerRuns.push(
+      new TextRun({
+        text: effectiveHeader,
+        font: fontName,
+        size: 19,
+        color: '535862',
+      }),
+    );
+  }
+  if (includePageNum) {
+    if (effectiveHeader) {
+      headerRuns.push(new TextRun({ text: '   •   หน้า ', font: fontName, size: 19, color: '535862' }));
+    } else {
+      headerRuns.push(new TextRun({ text: 'หน้า ', font: fontName, size: 19, color: '535862' }));
+    }
+    headerRuns.push(
+      new TextRun({
+        children: [PageNumber.CURRENT, ' / ', PageNumber.TOTAL_PAGES],
+        font: fontName,
+        size: 19,
+        color: '535862',
+      }),
+    );
+  }
+
   const docx = new DocxDocument({
     title: doc.title,
     creator: 'FolioWrite',
@@ -564,6 +599,42 @@ export async function exportDocumentAsDocx(doc: DocumentRecord): Promise<void> {
             },
           },
         },
+        headers:
+          headerRuns.length > 0
+            ? {
+                default: new Header({
+                  children: [
+                    new Paragraph({
+                      alignment: AlignmentType.RIGHT,
+                      border: {
+                        bottom: { style: BorderStyle.SINGLE, size: 4, color: 'E5E7EB', space: 6 },
+                      },
+                      spacing: { after: 140 },
+                      children: headerRuns,
+                    }),
+                  ],
+                }),
+              }
+            : undefined,
+        footers: includePageNum
+          ? {
+              default: new Footer({
+                children: [
+                  new Paragraph({
+                    alignment: AlignmentType.CENTER,
+                    children: [
+                      new TextRun({
+                        children: ['หน้า ', PageNumber.CURRENT, ' จาก ', PageNumber.TOTAL_PAGES],
+                        font: fontName,
+                        size: 18,
+                        color: '717680',
+                      }),
+                    ],
+                  }),
+                ],
+              }),
+            }
+          : undefined,
         children: children.length > 0 ? children : [new Paragraph({ children: [] })],
       },
     ],

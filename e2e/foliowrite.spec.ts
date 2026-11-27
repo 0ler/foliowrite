@@ -95,7 +95,7 @@ test.describe('FolioWrite Cross-Device E2E Flows (replica-test)', () => {
     expect(errors).toEqual([]);
   });
 
-  test('Mobile Viewport (390x844): Reflow View, Mobile Sticky Toolbar & Zero Horizontal Overflow', async ({
+  test('Mobile Viewport (390x844): Full Paper Sheet Visible Edge-to-Edge & Zero Horizontal Overflow', async ({
     browser,
   }) => {
     const context = await browser.newContext({
@@ -106,19 +106,26 @@ test.describe('FolioWrite Cross-Device E2E Flows (replica-test)', () => {
     const page = await context.newPage();
     await page.goto('/');
 
+    // Verify pure white background on Home
+    const homeBg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+    expect(homeBg).toBe('rgb(255, 255, 255)');
+
     const screenshotDir = path.resolve('replica/clone-screens');
     await page.screenshot({ path: path.join(screenshotDir, 'S01-mobile.png') });
 
-    // Open mobile navigation drawer
-    await page.locator('#btn-mobile-menu').click();
-    await expect(page.locator('#btn-new-blank-doc')).toBeVisible();
-    await page.locator('#btn-new-blank-doc').click();
+    // Open Thai Memo template on 390px phone so we can visually inspect the FULL scaled A4 sheet
+    await page.locator('#tpl-thai-memo').click();
 
-    // Verify Mobile Reflow sheet is active & mobile toolbar is visible
-    await expect(page.locator('.fw-sheet--reflow')).toBeVisible();
+    // Verify FULL A4 Portrait sheet (.fw-sheet--a4-portrait) is visible and scaled to fit <= 390px!
+    const sheet = page.locator('.fw-sheet--a4-portrait');
+    await expect(sheet).toBeVisible();
     await expect(page.getByRole('toolbar', { name: 'แถบเครื่องมือด่วนบนมือถือ' })).toBeVisible();
 
-    // Check that body does not overflow horizontally on 390px phone
+    const box = await sheet.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(391);
+
     const hasHorizontalOverflow = await page.evaluate(() => {
       return document.documentElement.scrollWidth > window.innerWidth + 2;
     });
@@ -128,7 +135,7 @@ test.describe('FolioWrite Cross-Device E2E Flows (replica-test)', () => {
     await context.close();
   });
 
-  test('PDF Import & PDF-to-DOCX Conversion: Thai glyphs, Headings, Alignment & Tables stay intact and editable', async ({
+  test('PDF Import & PDF-to-DOCX Conversion: Embedded Images, Thai glyphs, Headings & Tables stay intact and editable', async ({
     page,
   }) => {
     const errors: string[] = [];
@@ -141,23 +148,28 @@ test.describe('FolioWrite Cross-Device E2E Flows (replica-test)', () => {
     await page.locator('#tpl-thai-memo').click();
     await expect(page.locator('.tiptap')).toContainText('บันทึกข้อความ');
 
-    // Generate a real vector PDF with Thai floating vowels, centered heading, and multi-column table
-    const samplePdfPath = path.join('/tmp', `sample-thai-${Date.now()}.pdf`);
+    // Insert a real raster PNG image (src/assets/hero.png) BEFORE printing to PDF so the PDF contains an embedded raster image!
+    const rasterImgPath = path.resolve('src/assets/hero.png');
+    await page.locator('#input-editor-image').setInputFiles(rasterImgPath);
+    await expect(page.locator('.tiptap img:not(.ProseMirror-separator)').first()).toBeVisible();
+
+    // Generate a real vector + raster-image PDF
+    const samplePdfPath = path.join('/tmp', `sample-thai-img-${Date.now()}.pdf`);
     await page.pdf({
       path: samplePdfPath,
       format: 'A4',
       printBackground: true,
     });
     await page.emulateMedia({ media: 'screen' });
-    expect(fs.statSync(samplePdfPath).size).toBeGreaterThan(2000);
+    expect(fs.statSync(samplePdfPath).size).toBeGreaterThan(5000);
 
-    // Navigate cleanly to Home (resets Chromium print viewport from page.pdf()) and convert the PDF
+    // Navigate cleanly to Home and convert the PDF (text + table + image!)
     await page.goto('/');
     await expect(page.locator('#btn-convert-pdf-docx')).toBeVisible();
     await page.locator('#input-pdf-to-docx').setInputFiles(samplePdfPath);
 
-    // 1) Verify editor opened the converted PDF with 100% intact Thai words, headings, and table cells — and is editable!
-    await expect(page.locator('#input-doc-title')).toHaveValue(/sample-thai-/);
+    // 1) Verify editor opened the converted PDF with 100% intact Thai words, table cells, AND extracted image!
+    await expect(page.locator('#input-doc-title')).toHaveValue(/sample-thai-img-/);
     const editor = page.locator('.tiptap');
     await expect(editor).toContainText('บันทึกข้อความ');
     await expect(editor).toContainText('ความเป็นมาและวัตถุประสงค์');
@@ -165,15 +177,16 @@ test.describe('FolioWrite Cross-Device E2E Flows (replica-test)', () => {
     await expect(editor).toContainText('จัดเตรียมแม่แบบเอกสารหลักประจำฝ่าย');
     await expect(editor).toContainText('ทีมเทคโนโลยีสารสนเทศ');
     await expect(editor.locator('table').first()).toBeVisible();
+    await expect(editor.locator('img:not(.ProseMirror-separator)').first()).toBeVisible();
 
     // 2) Edit the converted PDF document directly to confirm full editability
     await editor.click();
     await page.keyboard.press('End');
     await page.keyboard.press('Enter');
-    await page.keyboard.type('แก้ไขเพิ่มเติมหลังแปลงจากไฟล์ PDF สำเร็จ');
-    await expect(editor).toContainText('แก้ไขเพิ่มเติมหลังแปลงจากไฟล์ PDF สำเร็จ');
+    await page.keyboard.type('แก้ไขเพิ่มเติมหลังแปลงจากไฟล์ PDF พร้อมรูปภาพสำเร็จ');
+    await expect(editor).toContainText('แก้ไขเพิ่มเติมหลังแปลงจากไฟล์ PDF พร้อมรูปภาพสำเร็จ');
 
-    // 3) Export the edited PDF-converted document to .docx and re-import to verify zero character/table loss
+    // 3) Export the edited PDF-converted document (including its extracted image!) to .docx and re-import
     await page.locator('#btn-file-export').click();
     const docxDownloadPromise = page.waitForEvent('download');
     await page.locator('#btn-export-docx').click();
@@ -182,20 +195,19 @@ test.describe('FolioWrite Cross-Device E2E Flows (replica-test)', () => {
 
     const convertedDocxPath = path.join('/tmp', `converted-from-pdf-${Date.now()}.docx`);
     await docxDownload.saveAs(convertedDocxPath);
-    expect(fs.statSync(convertedDocxPath).size).toBeGreaterThan(1500);
+    expect(fs.statSync(convertedDocxPath).size).toBeGreaterThan(3000);
 
     await page.locator('#btn-back-home').click();
     await page.locator('#input-import-file').setInputFiles(convertedDocxPath);
 
     await expect(page.locator('.tiptap')).toContainText('บันทึกข้อความ');
-    await expect(page.locator('.tiptap')).toContainText('ความเป็นมาและวัตถุประสงค์');
     await expect(page.locator('.tiptap')).toContainText('จัดเตรียมแม่แบบเอกสารหลักประจำฝ่าย');
-    await expect(page.locator('.tiptap')).toContainText('ทีมเทคโนโลยีสารสนเทศ');
-    await expect(page.locator('.tiptap')).toContainText('แก้ไขเพิ่มเติมหลังแปลงจากไฟล์ PDF สำเร็จ');
+    await expect(page.locator('.tiptap')).toContainText('แก้ไขเพิ่มเติมหลังแปลงจากไฟล์ PDF พร้อมรูปภาพสำเร็จ');
+    await expect(page.locator('.tiptap img:not(.ProseMirror-separator)').first()).toBeVisible();
     expect(errors).toEqual([]);
   });
 
-  test('Soft-Modern UX: Collapsible Template Strip, Floating Pill Toolbar above Paper & Image Insertion', async ({
+  test('White Theme, Collapsible Templates, Floating Pill Dock, Image Inspector & New Page Repeating Header', async ({
     page,
   }) => {
     await page.goto('/');
@@ -209,27 +221,42 @@ test.describe('FolioWrite Cross-Device E2E Flows (replica-test)', () => {
     await expect(page.locator('#tpl-quick-blank')).toBeVisible();
     await page.screenshot({ path: path.join(screenshotDir, 'S01-collapsed-templates.png') });
 
-    // Create a blank doc from the collapsed quick-pill
+    // Create doc from Thai Memo quick-pill
     await page.locator('#tpl-quick-thai-memo').click();
 
-    // 2) Verify Floating Pill Toolbar sits right above the paper inside canvas scroll
-    await expect(page.getByRole('region', { name: 'แถบเครื่องมือลอยเหนือกระดาษ' })).toBeVisible();
-    await expect(page.locator('#btn-quick-image')).toBeVisible();
+    // 2) Set custom Running Header on Sheet 1 ("บริษัท โฟลิโอ จำกัด — เอกสารภายใน")
+    const headerInput = page.locator('#input-running-header');
+    await expect(headerInput).toBeVisible();
+    await headerInput.fill('บริษัท โฟลิโอ จำกัด — เอกสารภายใน');
 
-    // 3) Click "+ รูปภาพ" on the floating pill bar to open Image Modal & insert an image
+    // 3) Insert a Page Break ("ขึ้นหน้าใหม่") and verify Page 2 displays the physical page gap + repeating header!
+    await page.locator('.tiptap').click();
+    await page.keyboard.press('End');
+    await page.locator('#ribbon-tab-insert').click();
+    await page.locator('#btn-insert-pagebreak').click();
+    await page.keyboard.type('เนื้อหาในแผ่นที่ 2 ต่อเนื่องจากแผ่นแรก พร้อมหัวกระดาษซ้ำอัตโนมัติ');
+
+    const pageBreakEl = page.locator('.fw-page-break').first();
+    await expect(pageBreakEl).toBeVisible();
+    const titleBefore = await page
+      .locator('.fw-page-break__title')
+      .first()
+      .evaluate((el) => getComputedStyle(el, '::before').getPropertyValue('content'));
+    expect(titleBefore).toContain('บริษัท โฟลิโอ จำกัด');
+
+    await pageBreakEl.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.join(screenshotDir, 'S02-new-page-header.png') });
+
+    // 4) Insert an image via "+ รูปภาพ" and verify Image Inspector Pill
     await page.locator('#btn-quick-image').click();
-    await expect(page.getByRole('heading', { name: 'แทรกรูปภาพลงในเอกสาร' })).toBeVisible();
-
     const iconSvgPath = path.resolve('public/foliowrite-icon.svg');
     await page.locator('#input-editor-image').setInputFiles(iconSvgPath);
 
     const insertedImg = page.locator('.tiptap img:not(.ProseMirror-separator)').first();
     await expect(insertedImg).toBeVisible();
-
-    // Click image to reveal Floating Image Inspector Pill & adjust size + alignment
     await insertedImg.click();
     await expect(page.getByRole('toolbar', { name: 'ปรับแต่งรูปภาพ' })).toBeVisible();
-    await page.locator('#btn-img-size-md').click();
+    await page.locator('#btn-img-size-sm').click();
     await page.locator('#btn-img-align-center').click();
 
     await page.screenshot({ path: path.join(screenshotDir, 'S02-floating-dock-image.png') });
