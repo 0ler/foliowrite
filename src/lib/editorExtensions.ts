@@ -63,17 +63,51 @@ export const ResizableImageExtension = Image.extend({
     return {
       ...this.parent?.(),
       width: {
-        default: null,
-        parseHTML: (element) => element.getAttribute('width') || element.style.width?.replace('px', '') || null,
+        default: 460,
+        parseHTML: (element) =>
+          element.getAttribute('width') || element.style.width?.replace('px', '') || 460,
         renderHTML: (attributes) => {
           if (!attributes.width) return {};
-          return {
-            width: attributes.width,
-            style: `width: ${attributes.width}px; max-width: 100%; height: auto;`,
-          };
+          return { width: String(attributes.width) };
         },
       },
+      align: {
+        default: 'center',
+        parseHTML: (element) => element.getAttribute('data-align') || 'center',
+        renderHTML: (attributes) => ({
+          'data-align': attributes.align || 'center',
+        }),
+      },
+      rounded: {
+        default: true,
+        parseHTML: (element) => element.getAttribute('data-rounded') !== 'false',
+        renderHTML: (attributes) => ({
+          'data-rounded': attributes.rounded === false ? 'false' : 'true',
+        }),
+      },
     };
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    const widthVal = HTMLAttributes.width ? `${HTMLAttributes.width}px` : '460px';
+    const alignVal = HTMLAttributes['data-align'] || 'center';
+    const isRounded = HTMLAttributes['data-rounded'] !== 'false';
+
+    const marginStyle =
+      alignVal === 'center'
+        ? 'display: block; margin: 14px auto;'
+        : alignVal === 'right'
+          ? 'display: block; margin: 14px 0 14px auto;'
+          : 'display: block; margin: 14px auto 14px 0;';
+
+    const radiusStyle = isRounded ? 'border-radius: 14px;' : 'border-radius: 4px;';
+
+    return [
+      'img',
+      mergeAttributes(this.options.HTMLAttributes, HTMLAttributes, {
+        style: `width: ${widthVal}; max-width: 100%; height: auto; ${marginStyle} ${radiusStyle}`,
+      }),
+    ];
   },
 });
 

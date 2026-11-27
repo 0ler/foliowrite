@@ -1,5 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import {
+  ChevronDown,
+  ChevronUp,
   Clock,
   Copy,
   Download,
@@ -12,6 +14,7 @@ import {
   Menu,
   Pin,
   PinOff,
+  Plus,
   RotateCcw,
   Search,
   Trash2,
@@ -80,6 +83,17 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   const [folderModalOpen, setFolderModalOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [newFolderColor, setNewFolderColor] = useState(FOLDER_COLORS[0]);
+  const [templatesCollapsed, setTemplatesCollapsed] = useState<boolean>(
+    () => localStorage.getItem('foliowrite_templates_collapsed') === '1',
+  );
+
+  const toggleTemplatesCollapsed = () => {
+    setTemplatesCollapsed((prev) => {
+      const next = !prev;
+      localStorage.setItem('foliowrite_templates_collapsed', next ? '1' : '0');
+      return next;
+    });
+  };
 
   const [isImporting, setIsImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -250,14 +264,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           <button
             id="btn-convert-pdf-docx"
             type="button"
-            className="fw-btn fw-btn--secondary"
-            style={{
-              width: '100%',
-              justifyContent: 'center',
-              borderColor: 'var(--color-accent)',
-              color: 'var(--color-accent)',
-              fontWeight: 600,
-            }}
+            className="fw-btn fw-btn--soft-accent"
+            style={{ width: '100%', justifyContent: 'center' }}
             disabled={isImporting}
             onClick={() => pdfToDocxInputRef.current?.click()}
           >
@@ -471,7 +479,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             />
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div className="fw-view-capsule" role="group" aria-label="สลับมุมมองรายการ">
             <button
               id="btn-view-grid"
               type="button"
@@ -497,48 +505,92 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
         <div className="fw-home-content">
           {filter.kind !== 'trash' && !searchQuery.trim() && (
-            <section aria-labelledby="templates-heading">
+            <section
+              aria-labelledby="templates-heading"
+              className={`fw-template-section ${templatesCollapsed ? 'fw-template-section--collapsed' : ''}`}
+            >
               <div className="fw-section-header">
-                <h2 id="templates-heading" className="fw-section-title">
-                  เริ่มเอกสารใหม่จากแม่แบบ
-                </h2>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, flex: 1 }}>
+                  <h2 id="templates-heading" className="fw-section-title" style={{ whiteSpace: 'nowrap' }}>
+                    เริ่มเอกสารใหม่จากแม่แบบ
+                  </h2>
+                  {templatesCollapsed && (
+                    <div className="fw-template-quick-pills" aria-label="ปุ่มลัดสร้างจากแม่แบบ">
+                      {STARTER_TEMPLATES.map((tpl) => (
+                        <button
+                          key={tpl.id}
+                          id={`tpl-quick-${tpl.id}`}
+                          type="button"
+                          className="fw-template-quick-pill"
+                          onClick={() => onCreateFromTemplate(tpl, activeFolderId)}
+                        >
+                          <Plus size={13} />
+                          {tpl.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  id="btn-toggle-templates"
+                  type="button"
+                  className="fw-btn fw-btn--ghost fw-btn--sm"
+                  onClick={toggleTemplatesCollapsed}
+                  aria-expanded={!templatesCollapsed}
+                >
+                  {templatesCollapsed ? (
+                    <>
+                      <span>ขยายแถบแม่แบบ ({STARTER_TEMPLATES.length})</span>
+                      <ChevronDown size={15} />
+                    </>
+                  ) : (
+                    <>
+                      <span>ย่อแถบแม่แบบ</span>
+                      <ChevronUp size={15} />
+                    </>
+                  )}
+                </button>
               </div>
-              <div className="fw-template-grid">
-                {STARTER_TEMPLATES.map((tpl) => (
-                  <button
-                    key={tpl.id}
-                    id={`tpl-${tpl.id}`}
-                    type="button"
-                    className="fw-template-card"
-                    onClick={() => onCreateFromTemplate(tpl, activeFolderId)}
-                  >
-                    {tpl.id === 'blank' ? (
-                      <div className="fw-template-preview fw-template-preview--blank">
-                        <FilePlus2 size={30} />
-                      </div>
-                    ) : (
-                      <div className="fw-template-preview" aria-hidden="true">
-                        <div className="fw-template-line fw-template-line--title" />
-                        <div className="fw-template-line" style={{ width: '92%' }} />
-                        <div className="fw-template-line" style={{ width: '84%' }} />
-                        <div className="fw-template-line" style={{ width: '70%' }} />
-                        <div
-                          style={{
-                            marginTop: 4,
-                            height: 28,
-                            border: '1px solid var(--color-border)',
-                            borderRadius: 4,
-                            background: 'var(--color-bg)',
-                          }}
-                        />
-                      </div>
-                    )}
-                    <span className="fw-template-card__cat">{tpl.category}</span>
-                    <span className="fw-template-card__name">{tpl.name}</span>
-                    <span className="fw-template-card__desc">{tpl.description}</span>
-                  </button>
-                ))}
-              </div>
+
+              {!templatesCollapsed && (
+                <div className="fw-template-grid">
+                  {STARTER_TEMPLATES.map((tpl) => (
+                    <button
+                      key={tpl.id}
+                      id={`tpl-${tpl.id}`}
+                      type="button"
+                      className="fw-template-card"
+                      onClick={() => onCreateFromTemplate(tpl, activeFolderId)}
+                    >
+                      {tpl.id === 'blank' ? (
+                        <div className="fw-template-preview fw-template-preview--blank">
+                          <FilePlus2 size={30} />
+                        </div>
+                      ) : (
+                        <div className="fw-template-preview" aria-hidden="true">
+                          <div className="fw-template-line fw-template-line--title" />
+                          <div className="fw-template-line" style={{ width: '92%' }} />
+                          <div className="fw-template-line" style={{ width: '84%' }} />
+                          <div className="fw-template-line" style={{ width: '70%' }} />
+                          <div
+                            style={{
+                              marginTop: 4,
+                              height: 26,
+                              border: '1px solid var(--color-border-soft)',
+                              borderRadius: 8,
+                              background: 'var(--color-bg)',
+                            }}
+                          />
+                        </div>
+                      )}
+                      <span className="fw-template-card__cat">{tpl.category}</span>
+                      <span className="fw-template-card__name">{tpl.name}</span>
+                      <span className="fw-template-card__desc">{tpl.description}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </section>
           )}
 

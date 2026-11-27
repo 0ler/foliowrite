@@ -504,7 +504,22 @@ async function convertBlockNodes(
 
     const fallbackRuns = await collectInlineRuns(el, baseStyle);
     if (fallbackRuns.length > 0) {
-      out.push(new Paragraph({ children: fallbackRuns, spacing: { after: 120 } }));
+      const imgAlignAttr = tag === 'img' ? el.getAttribute('data-align') : null;
+      const imgAlignment =
+        imgAlignAttr === 'center'
+          ? AlignmentType.CENTER
+          : imgAlignAttr === 'right'
+            ? AlignmentType.RIGHT
+            : imgAlignAttr === 'left'
+              ? AlignmentType.LEFT
+              : parseAlignment(el);
+      out.push(
+        new Paragraph({
+          alignment: imgAlignment,
+          children: fallbackRuns,
+          spacing: { before: 100, after: 140 },
+        }),
+      );
     }
   }
 

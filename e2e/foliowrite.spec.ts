@@ -194,4 +194,44 @@ test.describe('FolioWrite Cross-Device E2E Flows (replica-test)', () => {
     await expect(page.locator('.tiptap')).toContainText('แก้ไขเพิ่มเติมหลังแปลงจากไฟล์ PDF สำเร็จ');
     expect(errors).toEqual([]);
   });
+
+  test('Soft-Modern UX: Collapsible Template Strip, Floating Pill Toolbar above Paper & Image Insertion', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    const screenshotDir = path.resolve('replica/clone-screens');
+    fs.mkdirSync(screenshotDir, { recursive: true });
+
+    // 1) Collapse the Template Gallery and verify compact quick-pills appear
+    await expect(page.locator('.fw-template-grid')).toBeVisible();
+    await page.locator('#btn-toggle-templates').click();
+    await expect(page.locator('.fw-template-grid')).toHaveCount(0);
+    await expect(page.locator('#tpl-quick-blank')).toBeVisible();
+    await page.screenshot({ path: path.join(screenshotDir, 'S01-collapsed-templates.png') });
+
+    // Create a blank doc from the collapsed quick-pill
+    await page.locator('#tpl-quick-thai-memo').click();
+
+    // 2) Verify Floating Pill Toolbar sits right above the paper inside canvas scroll
+    await expect(page.getByRole('region', { name: 'แถบเครื่องมือลอยเหนือกระดาษ' })).toBeVisible();
+    await expect(page.locator('#btn-quick-image')).toBeVisible();
+
+    // 3) Click "+ รูปภาพ" on the floating pill bar to open Image Modal & insert an image
+    await page.locator('#btn-quick-image').click();
+    await expect(page.getByRole('heading', { name: 'แทรกรูปภาพลงในเอกสาร' })).toBeVisible();
+
+    const iconSvgPath = path.resolve('public/foliowrite-icon.svg');
+    await page.locator('#input-editor-image').setInputFiles(iconSvgPath);
+
+    const insertedImg = page.locator('.tiptap img:not(.ProseMirror-separator)').first();
+    await expect(insertedImg).toBeVisible();
+
+    // Click image to reveal Floating Image Inspector Pill & adjust size + alignment
+    await insertedImg.click();
+    await expect(page.getByRole('toolbar', { name: 'ปรับแต่งรูปภาพ' })).toBeVisible();
+    await page.locator('#btn-img-size-md').click();
+    await page.locator('#btn-img-align-center').click();
+
+    await page.screenshot({ path: path.join(screenshotDir, 'S02-floating-dock-image.png') });
+  });
 });
